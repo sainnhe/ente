@@ -35,6 +35,7 @@ type CollectionController struct {
 	UserRepo              *repo.UserRepository
 	FileRepo              *repo.FileRepository
 	QueueRepo             *repo.QueueRepository
+	TrashRepo             *repo.TrashRepository
 	CastRepo              *cast.Repository
 	TaskRepo              *repo.TaskLockRepository
 	CollectionActionsRepo *repo.CollectionActionsRepository
@@ -205,7 +206,7 @@ func (c *CollectionController) UpdateMagicMetadata(ctx *gin.Context, request ent
 	return nil
 }
 
-func (c *CollectionController) HandleAccountDeletion(ctx context.Context, userID int64, logger *log.Entry) error {
+func (c *CollectionController) ResetUserSharingAccess(ctx context.Context, userID int64, logger *log.Entry) error {
 	logger.Info("disabling shared collections with or by the user")
 	sharedCollections, err := c.CollectionRepo.GetAllSharedCollections(ctx, userID)
 	if err != nil {
@@ -228,6 +229,10 @@ func (c *CollectionController) HandleAccountDeletion(ctx context.Context, userID
 	}
 	err = c.CollectionLinkCtrl.HandleAccountDeletion(ctx, userID, logger)
 	return stacktrace.Propagate(err, "")
+}
+
+func (c *CollectionController) HandleAccountDeletion(ctx context.Context, userID int64, logger *log.Entry) error {
+	return c.ResetUserSharingAccess(ctx, userID, logger)
 }
 
 // Verify that user owns the collection

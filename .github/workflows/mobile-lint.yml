@@ -1,23 +1,23 @@
 name: "Lint (mobile)"
 
 on:
-    # Run on every pull request (open or push to it) that changes mobile/
+    # Run on every pull request (open or push to it) that changes photos app or rust core
     pull_request:
         paths:
             - "mobile/apps/photos/**"
-            - "mobile/packages/rust/**"
             - "rust/core/**"
             - ".github/workflows/mobile-lint.yml"
 
 env:
     FLUTTER_VERSION: "3.32.8"
+    RUST_VERSION: "1.90.0"
     RUSTFLAGS: -D warnings
 
 permissions:
     contents: read
 
 jobs:
-    lint:
+    mobile-lint:
         runs-on: ubuntu-latest
         defaults:
             run:
@@ -34,6 +34,12 @@ jobs:
                   channel: "stable"
                   flutter-version: ${{ env.FLUTTER_VERSION  }}
                   cache: true
+
+            - name: Install Rust ${{ env.RUST_VERSION }}
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  toolchain: ${{ env.RUST_VERSION }}
+                  components: rustfmt,clippy
 
             - name: Cache
               uses: actions/cache@v4

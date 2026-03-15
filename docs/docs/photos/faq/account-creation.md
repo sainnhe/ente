@@ -148,6 +148,10 @@ Since Ente uses end-to-end encryption, we cannot reset your password without you
 
 **Never skip this step!** Without your recovery key, losing your password means permanently losing access to your photos.
 
+### Can the recovery key be changed? {#change-recovery-key}
+
+No, the recovery key cannot be changed or rotated. If you suspect your recovery key has been compromised, we recommend creating a new account and migrating your data.
+
 ### How do I reset my password if I lost it? {#reset-password}
 
 On the login page:
@@ -174,6 +178,8 @@ Yes! Ente recommends enabling 2FA for additional security. Supported methods inc
 - **Passkeys** as an alternative 2FA mechanism
 
 You can set up 2FA in Settings on mobile or desktop apps.
+
+Warning: if you use the same account in Ente Auth, enabling 2FA in Ente Photos also enables it for Ente Auth, which can be a problem if you store your Ente account's 2FA code inside Ente Auth itself. See [Enteception](/auth/faq/enteception/).
 
 Learn more in our [Security and Privacy FAQ](/photos/faq/security-and-privacy).
 

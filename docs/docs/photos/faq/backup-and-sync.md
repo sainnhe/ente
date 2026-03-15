@@ -136,7 +136,7 @@ Ente tracks which files have been uploaded and won't upload them again, even if 
 
 **To force a re-upload of previously uploaded files:**
 
-You would need to use "Reset ignored files" in `Settings > Backup`. However, this is rarely needed and should be done carefully as it will re-upload all previously uploaded files.
+You would need to use "Reset ignored files" option seen when opening an 'On Device' album that is backed up. However, this is rarely needed and should be done carefully as it will re-upload all previously uploaded files.
 
 ### How does Ente handle duplicate files during backup? {#duplicate-handling}
 
@@ -231,6 +231,19 @@ Ente backs up a single primary full-resolution image from the Burst. Additional 
 
 iCloud Shared Albums store compressed copies, not the original files. Because of this, Ente sees the shared-album copy as a different file, so it gets backed up separately and appears as a duplicate.
 
+### Why are 2 copies of the same photo seen, one synced and one unsynced (slashed cloud icon) during device migration? {#migration-duplicate-photos}
+
+During migration, Ente rechecks all local photos against what is already uploaded. While this scan is in progress, the same photo can appear twice:
+
+- One as synced (already uploaded)
+- One as unsynced (slashed cloud), representing the local copy being verified
+
+This is temporary. Once verification finishes, the duplicate view disappears and only the synced photo remains.
+
+### When I choose "Delete Both" on a photo, why do I still see it in my device's native gallery? {#delete-both-photo-still-visible}
+
+When you select "Delete Both", Ente deletes the copy stored in Ente as well as the copy stored on your device. However, if you have Google Photos backup or iCloud backup enabled, the cloud copy from those services will still be visible in your native gallery. That copy is managed by Google or Apple, not by Ente.
+
 ## Background Sync
 
 ### How does background sync work? {#how-background-sync-works}
@@ -313,7 +326,7 @@ On Android, the app can run background processes more freely than iOS. However, 
 
 ### How do watch folders work? {#how-watch-folders-work}
 
-Watch folders allow the Ente desktop app to automatically monitor specific directories on your computer and sync any changes to Ente. When you add or modify files in a watched folder, they're automatically uploaded.
+Watch folders allow the Ente desktop app to automatically monitor specific directories on your computer and sync new files and deletions to Ente. When you add new files in a watched folder, they're automatically uploaded.
 
 **Key features:**
 
@@ -330,7 +343,7 @@ Learn more in the [Watch folders feature guide](/photos/features/backup-and-sync
 Watch folders is a desktop app feature that automatically syncs specific folders on your computer to Ente. Once you add a folder to watch, the app will:
 
 - Immediately upload all existing files in that folder
-- Continuously monitor the folder for changes
+- Continuously monitor the folder for new files and deletions
 - Automatically upload any new files added to the folder
 - Move files to Uncategorized if you delete them locally
 
@@ -344,7 +357,7 @@ This creates a one-way background sync from your computer to Ente, automating yo
 4. If the folder has nested subfolders, choose between:
     - **Single album**: All files go into one Ente album
     - **Separate albums**: Each subfolder becomes its own album
-5. The folder will be initially synced and then monitored for changes
+5. The folder will be initially synced and then monitored for new files and deletions
 
 The sync happens in the background even when the app is minimized. You can see progress in the bottom right corner.
 

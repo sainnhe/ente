@@ -35,7 +35,6 @@ import (
 	"github.com/ente-io/museum/pkg/controller/offer"
 	"github.com/ente-io/museum/pkg/controller/usercache"
 
-	"github.com/GoKillers/libsodium-go/sodium"
 	"github.com/dlmiddlecote/sqlstats"
 	"github.com/ente-io/museum/ente/jwt"
 	"github.com/ente-io/museum/pkg/api"
@@ -103,6 +102,7 @@ func main() {
 	viper.SetDefault("apps.embed-albums", "https://embed.ente.io")
 	viper.SetDefault("apps.custom-domain.cname", "my.ente.io")
 	viper.SetDefault("apps.public-locker", "https://share.ente.io")
+	viper.SetDefault("apps.public-paste", "https://paste.ente.io")
 	viper.SetDefault("apps.accounts", "https://accounts.ente.io")
 	viper.SetDefault("apps.cast", "https://cast.ente.io")
 	viper.SetDefault("apps.family", "https://family.ente.io")
@@ -130,8 +130,6 @@ func main() {
 
 	db := setupDatabase()
 	defer db.Close()
-
-	sodium.Init()
 
 	hostName, err := os.Hostname()
 	if err != nil {
@@ -170,6 +168,7 @@ func main() {
 	authRepo := &authenticatorRepo.Repository{DB: db}
 	remoteStoreRepository := &remotestore.Repository{DB: db}
 	dataCleanupRepository := &datacleanup.Repository{DB: db}
+	emergencyContactRepository := &emergencyRepo.Repository{DB: db}
 
 	notificationHistoryRepo := &repo.NotificationHistoryRepository{DB: db}
 	queueRepo := &repo.QueueRepository{DB: db}
@@ -181,6 +180,7 @@ func main() {
 		ObjectRepo: objectRepo, ObjectCleanupRepo: objectCleanupRepo,
 		ObjectCopiesRepo: objectCopiesRepo, UsageRepo: usageRepo}
 	fileLinkRepo := public.NewFileLinkRepo(db)
+	pasteRepo := public.NewPasteRepository(db)
 	fileDataRepo := &fileDataRepo.Repository{DB: db, ObjectCleanupRepo: objectCleanupRepo}
 	familyRepo := &repo.FamilyRepository{DB: db}
 	trashRepo := &repo.TrashRepository{DB: db, ObjectRepo: objectRepo, FileRepo: fileRepo, QueueRepo: queueRepo, FileLinkRepo: fileLinkRepo}
@@ -217,7 +217,7 @@ func main() {
 	stripeClients := billing.GetStripeClients()
 	commonBillController := commonbilling.NewController(emailNotificationCtrl, storagBonusRepo, userRepo, usageRepo, billingRepo)
 	appStoreController := controller.NewAppStoreController(defaultPlan,
-		billingRepo, fileRepo, userRepo, commonBillController, discordController)
+		billingRepo, fileRepo, userRepo, remoteStoreRepository, commonBillController, discordController)
 	playStoreController := controller.NewPlayStoreController(defaultPlan,
 		billingRepo, fileRepo, userRepo, storagBonusRepo, commonBillController)
 	stripeController := controller.NewStripeController(plans, stripeClients,
@@ -226,10 +226,15 @@ func main() {
 		appStoreController, playStoreController, stripeController,
 		discordController, emailNotificationCtrl,
 		billingRepo, userRepo, usageRepo, storagBonusRepo, commonBillController)
-	remoteStoreController := &remoteStoreCtrl.Controller{Repo: remoteStoreRepository, BillingCtrl: billingController}
+	remoteStoreController := &remoteStoreCtrl.Controller{
+		Repo:        remoteStoreRepository,
+		BillingCtrl: billingController,
+		UserRepo:    userRepo,
+		FamilyRepo:  familyRepo,
+	}
 
 	pushController := controller.NewPushController(pushRepo, taskLockingRepo, hostName)
-	mailingListsController := controller.NewMailingListsController()
+	mailingListsController := controller.NewMailingListsController(discordController)
 
 	storageBonusCtrl := &storagebonus.Controller{
 		UserRepo:                    userRepo,
@@ -322,11 +327,12 @@ func main() {
 	}
 
 	familyController := &family.Controller{
-		FamilyRepo:    familyRepo,
-		BillingCtrl:   billingController,
-		UserRepo:      userRepo,
-		UserCacheCtrl: userCacheCtrl,
-		UsageRepo:     usageRepo,
+		FamilyRepo:      familyRepo,
+		BillingCtrl:     billingController,
+		UserRepo:        userRepo,
+		UserCacheCtrl:   userCacheCtrl,
+		UsageRepo:       usageRepo,
+		RemoteStoreRepo: remoteStoreRepository,
 	}
 
 	collectionLinkCtrl := &publicCtrl.CollectionLinkController{
@@ -366,6 +372,7 @@ func main() {
 		CollectionLinkCtrl:    collectionLinkCtrl,
 		UserRepo:              userRepo,
 		FileRepo:              fileRepo,
+		TrashRepo:             trashRepo,
 		CastRepo:              &castDb,
 		BillingCtrl:           billingController,
 		QueueRepo:             queueRepo,
@@ -408,12 +415,24 @@ func main() {
 		userCache,
 		userCacheCtrl,
 	)
+	inactiveUserOrchestrator := user.NewInactiveUserOrchestrator(
+		userRepo,
+		notificationHistoryRepo,
+		emergencyContactRepository,
+		lockController,
+		discordController,
+		userController,
+	)
 	fileLinkCtrl := &publicCtrl.FileLinkController{
 		FileController: fileController,
 		FileLinkRepo:   fileLinkRepo,
 		FileRepo:       fileRepo,
-		BillingCtrl:    billingController,
 		JwtSecret:      jwtSecretBytes,
+	}
+	pasteCtrl := &publicCtrl.PasteController{
+		PasteRepo:   pasteRepo,
+		JwtSecret:   jwtSecretBytes,
+		PasteOrigin: viper.GetString("apps.public-paste"),
 	}
 
 	passkeyCtrl := &controller.PasskeyController{
@@ -519,6 +538,7 @@ func main() {
 		FileDataCtrl: fileDataCtrl,
 		FileUrlCtrl:  fileLinkCtrl,
 	}
+	pasteHandler := &api.PasteHandler{Controller: pasteCtrl}
 	privateAPI.GET("/files/upload-urls", fileHandler.GetUploadURLs)
 	privateAPI.GET("/files/multipart-upload-urls", fileHandler.GetMultipartUploadURLs)
 	privateAPI.POST("/files/upload-url", fileHandler.GetUploadURLV2)
@@ -529,6 +549,7 @@ func main() {
 	privateAPI.GET("/files/preview/v2/:fileID", fileHandler.GetThumbnail)
 
 	privateAPI.POST("/files/share-url", fileHandler.ShareUrl)
+	privateAPI.GET("/files/share-url", fileHandler.GetUrls)
 	privateAPI.PUT("/files/share-url", fileHandler.UpdateFileURL)
 	privateAPI.DELETE("/files/share-url/:fileID", fileHandler.DisableUrl)
 	privateAPI.GET("/files/share-urls/", fileHandler.GetUrls)
@@ -554,6 +575,9 @@ func main() {
 	privateAPI.PUT("/files/magic-metadata", fileHandler.UpdateMagicMetadata)
 	privateAPI.PUT("/files/public-magic-metadata", fileHandler.UpdatePublicMagicMetadata)
 	publicAPI.GET("/files/count", fileHandler.GetTotalFileCount)
+	publicAPI.POST("/paste/create", pasteHandler.Create)
+	publicAPI.POST("/paste/guard", pasteHandler.Guard)
+	publicAPI.POST("/paste/consume", pasteHandler.Consume)
 
 	trashHandler := &api.TrashHandler{
 		Controller: trashController,
@@ -585,7 +609,7 @@ func main() {
 	privateAPI.GET("/comments-reactions/updated-at", socialHandler.LatestUpdates)
 
 	emergencyCtrl := &emergency.Controller{
-		Repo:              &emergencyRepo.Repository{DB: db},
+		Repo:              emergencyContactRepository,
 		UserRepo:          userRepo,
 		UserCtrl:          userController,
 		PasskeyController: passkeyCtrl,
@@ -700,7 +724,9 @@ func main() {
 	publicCollectionAPI.GET("/diff", publicCollectionHandler.GetDiff)
 	publicCollectionAPI.GET("/info", publicCollectionHandler.GetCollection)
 	publicCollectionAPI.GET("/upload-urls", publicCollectionHandler.GetUploadUrls)
+	publicCollectionAPI.POST("/upload-url", publicCollectionHandler.GetUploadURLV2)
 	publicCollectionAPI.GET("/multipart-upload-urls", publicCollectionHandler.GetMultipartUploadURLs)
+	publicCollectionAPI.POST("/multipart-upload-url", publicCollectionHandler.GetMultipartUploadURLV2)
 	publicCollectionAPI.POST("/file", publicCollectionHandler.CreateFile)
 	publicCollectionAPI.POST("/verify-password", publicCollectionHandler.VerifyPassword)
 	publicCollectionAPI.GET("/social/diff", publicSocialHandler.SocialDiff)
@@ -835,6 +861,7 @@ func main() {
 	adminAPI.POST("/mail", adminHandler.SendMail)
 	adminAPI.POST("/mail/subscribe", adminHandler.SubscribeMail)
 	adminAPI.POST("/mail/unsubscribe", adminHandler.UnsubscribeMail)
+	adminAPI.GET("/listmonk/missing-subscribers/count", adminHandler.GetListmonkMissingSubscribersCount)
 	adminAPI.GET("/users", adminHandler.GetUsers)
 	adminAPI.GET("/user", adminHandler.GetUser)
 	adminAPI.POST("/user/disable-2fa", adminHandler.DisableTwoFactor)
@@ -865,7 +892,7 @@ func main() {
 	privateAPI.DELETE("/user-entity/entity", userEntityHandler.DeleteEntity)
 	privateAPI.GET("/user-entity/entity/diff", userEntityHandler.GetDiff)
 
-	authenticatorController := &authenticatorCtrl.Controller{Repo: authRepo}
+	authenticatorController := &authenticatorCtrl.Controller{Repo: authRepo, UserRepo: userRepo}
 	authenticatorHandler := &api.AuthenticatorHandler{Controller: authenticatorController}
 
 	privateAPI.POST("/authenticator/key", authenticatorHandler.CreateKey)
@@ -915,9 +942,9 @@ func main() {
 	setKnownAPIs(server.Routes())
 	setupAndStartBackgroundJobs(objectCleanupController, replicationController3, fileDataCtrl)
 	setupAndStartCrons(
-		userAuthRepo, collectionLinkRepo, fileLinkRepo, twoFactorRepo, passkeysRepo, fileController, taskLockingRepo, emailNotificationCtrl,
+		userAuthRepo, collectionLinkRepo, fileLinkRepo, pasteRepo, twoFactorRepo, passkeysRepo, fileController, taskLockingRepo, emailNotificationCtrl,
 		trashController, pushController, objectController, dataCleanupController, storageBonusCtrl, emergencyCtrl,
-		embeddingController, healthCheckHandler, castDb)
+		embeddingController, healthCheckHandler, castDb, inactiveUserOrchestrator)
 
 	// Create a new collector, the name will be used as a label on the metrics
 	collector := sqlstats.NewStatsCollector("prod_db", db)
@@ -1054,6 +1081,7 @@ func setupAndStartBackgroundJobs(
 
 func setupAndStartCrons(userAuthRepo *repo.UserAuthRepository, collectionLinkRepo *public.CollectionLinkRepo,
 	fileLinkRepo *public.FileLinkRepository,
+	pasteRepo *public.PasteRepository,
 	twoFactorRepo *repo.TwoFactorRepository, passkeysRepo *passkey.Repository, fileController *controller.FileController,
 	taskRepo *repo.TaskLockRepository, emailNotificationCtrl *email.EmailNotificationController,
 	trashController *controller.TrashController, pushController *controller.PushController,
@@ -1063,7 +1091,9 @@ func setupAndStartCrons(userAuthRepo *repo.UserAuthRepository, collectionLinkRep
 	emergencyCtrl *emergency.Controller,
 	embeddingCtrl *embeddingCtrl.Controller,
 	healthCheckHandler *api.HealthCheckHandler,
-	castDb castRepo.Repository) {
+	castDb castRepo.Repository,
+	inactiveUserOrchestrator *user.InactiveUserOrchestrator) {
+	const deletedTokenRetentionDays = 427 // 13-month deletion window (395 days) + 32-day safety buffer
 	shouldSkipCron := viper.GetBool("jobs.cron.skip")
 	if shouldSkipCron {
 		log.Info("Skipping cron jobs")
@@ -1076,10 +1106,14 @@ func setupAndStartCrons(userAuthRepo *repo.UserAuthRepository, collectionLinkRep
 	})
 
 	schedule(c, "@every 24h", func() {
-		_ = userAuthRepo.RemoveDeletedTokens(timeUtil.MicrosecondsBeforeDays(30))
+		_ = userAuthRepo.RemoveDeletedTokens(timeUtil.MicrosecondsBeforeDays(deletedTokenRetentionDays))
 		_ = castDb.DeleteOldSessions(context.Background(), timeUtil.MicrosecondsBeforeDays(7))
 		_ = collectionLinkRepo.CleanupAccessHistory(context.Background())
 		_ = fileLinkRepo.CleanupAccessHistory(context.Background())
+	})
+
+	schedule(c, "@every 30m", func() {
+		_ = pasteRepo.CleanupExpired(context.Background())
 	})
 
 	schedule(c, "@every 1m", func() {
@@ -1163,6 +1197,10 @@ func setupAndStartCrons(userAuthRepo *repo.UserAuthRepository, collectionLinkRep
 		}
 	})
 
+	scheduleAndRun(c, "@every 24h", func() {
+		inactiveUserOrchestrator.ProcessInactiveUsers()
+	})
+
 	schedule(c, "@every 1m", func() {
 		pushController.SendPushes()
 	})
@@ -1178,7 +1216,7 @@ func cors() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", c.GetHeader("Origin"))
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Auth-Token, X-Auth-Access-Token, X-Cast-Access-Token, X-Auth-Access-Token-JWT, X-Client-Package, X-Client-Version, Authorization, accept, origin, Cache-Control, X-Requested-With, upgrade-insecure-requests, Range")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Auth-Token, X-Auth-Access-Token, X-Cast-Access-Token, X-Auth-Access-Token-JWT, X-Client-Package, X-Client-Version, X-Paste-Consume, Authorization, accept, origin, Cache-Control, X-Requested-With, upgrade-insecure-requests, Range")
 		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-Id")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, PATCH, DELETE")
 		c.Writer.Header().Set("Access-Control-Max-Age", "1728000")

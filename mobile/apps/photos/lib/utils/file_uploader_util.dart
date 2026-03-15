@@ -9,7 +9,6 @@ import "package:computer/computer.dart";
 import 'package:ente_crypto/ente_crypto.dart';
 import "package:exif_reader/exif_reader.dart";
 import 'package:logging/logging.dart';
-import "package:motion_photos/motion_photos.dart";
 import 'package:motionphoto/motionphoto.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
@@ -17,7 +16,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:photos/core/configuration.dart';
 import 'package:photos/core/constants.dart';
 import 'package:photos/core/errors.dart';
-import "package:photos/models/api/metadata.dart";
+import "package:photos/gateways/collections/models/metadata.dart";
 import "package:photos/models/ffmpeg/ffprobe_props.dart";
 import "package:photos/models/file/extensions/file_props.dart";
 import 'package:photos/models/file/file.dart';
@@ -25,6 +24,7 @@ import 'package:photos/models/file/file_type.dart';
 import "package:photos/models/location/location.dart";
 import "package:photos/models/metadata/file_magic.dart";
 import "package:photos/services/sync/local_sync_service.dart";
+import "package:photos/src/rust/api/motion_photo_api.dart";
 import "package:photos/utils/exif_util.dart";
 import 'package:photos/utils/file_util.dart';
 import "package:uuid/uuid.dart";
@@ -193,17 +193,21 @@ Future<MediaUploadData> _getMediaUploadDataFromAssetFile(
   isDeleted = !(await asset.exists);
   int? h, w;
   if (asset.width != 0 && asset.height != 0) {
-    h = asset.height;
     w = asset.width;
+    h = asset.height;
+    if (Platform.isAndroid &&
+        file.fileType == FileType.image &&
+        _shouldSwapDimensionsForExifOrientation(exifData)) {
+      final temp = w;
+      w = h;
+      h = temp;
+    }
   }
   int? motionPhotoStartingIndex;
   if (Platform.isAndroid && asset.type == AssetType.image) {
     try {
-      motionPhotoStartingIndex = await Computer.shared().compute(
-        motionVideoIndex,
-        param: {'path': sourceFile.path},
-        taskName: 'motionPhotoIndex',
-      );
+      motionPhotoStartingIndex =
+          await motionVideoIndex({'path': sourceFile.path});
     } catch (e) {
       _logger.severe('error while detecthing motion photo start index', e);
     }
@@ -222,9 +226,16 @@ Future<MediaUploadData> _getMediaUploadDataFromAssetFile(
   );
 }
 
+bool _shouldSwapDimensionsForExifOrientation(Map<String, IfdTag>? exifData) {
+  final orientation = exifData?['Image Orientation']?.values.firstAsInt() ?? 1;
+  // EXIF orientations 5-8 are rotated 90/270 variants and require w/h swap.
+  return orientation >= 5 && orientation <= 8;
+}
+
 Future<int?> motionVideoIndex(Map<String, dynamic> args) async {
   final String path = args['path'];
-  return (await MotionPhotos(path).getMotionVideoIndex())?.start;
+  final videoIndex = await getMotionVideoIndex(filePath: path);
+  return videoIndex?.start.toInt();
 }
 
 Future<void> _computeZip(Map<String, dynamic> args) async {
@@ -410,6 +421,12 @@ Future<MediaUploadData> _getMediaUploadDataFromAppCache(
       if (exifData != null) {
         cameraMake = _extractPrintableExifValue(exifData['Image Make']);
         cameraModel = _extractPrintableExifValue(exifData['Image Model']);
+        if (!file.hasLocation) {
+          final exifLocation = locationFromExif(exifData);
+          if (Location.isValidLocation(exifLocation)) {
+            file.location = exifLocation;
+          }
+        }
       }
     } else if (thumbnailData != null) {
       // the thumbnail null check is to ensure that we are able to generate thum
@@ -421,6 +438,13 @@ Future<MediaUploadData> _getMediaUploadDataFromAppCache(
         quality: 10,
       );
       dimensions = await getImageHeightAndWith(imagePath: thumbnailFilePath);
+    }
+
+    if (!file.hasLocation && file.isVideo && Platform.isAndroid) {
+      final FFProbeProps? props = await getVideoPropsAsync(sourceFile);
+      if (props?.location != null) {
+        file.location = props!.location;
+      }
     }
     return MediaUploadData(
       sourceFile,

@@ -15,6 +15,7 @@ import (
 	"net/smtp"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/ente-io/museum/ente"
 	"github.com/ente-io/stacktrace"
@@ -25,6 +26,11 @@ import (
 var knownInvalidEmailErrors = []string{
 	"Invalid RCPT TO address provided",
 	"Invalid domain name",
+}
+
+// NormalizeEmail returns a canonical form for case-insensitive email lookup and hashing.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 // https://datatracker.ietf.org/doc/html/rfc5322#section-2.1.1
@@ -146,7 +152,8 @@ func sendViaSMTP(toEmails []string, fromName string, fromEmail string, subject s
 		emailAddresses += sanitizeHeaderValue(addr)
 	}
 
-	header := "From: " + cleanFromName + " <" + cleanFromEmail + ">\n" +
+	header := "Date: " + time.Now().Format(time.RFC1123Z) + "\n" +
+		"From: " + cleanFromName + " <" + cleanFromEmail + ">\n" +
 		"To: " + emailAddresses + "\n" +
 		"Subject: " + cleanSubject + "\n" +
 		"MIME-Version: 1.0\n" +

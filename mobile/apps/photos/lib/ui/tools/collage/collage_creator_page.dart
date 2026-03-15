@@ -1,10 +1,10 @@
+import "package:ente_pure_utils/ente_pure_utils.dart";
 import "package:flutter/material.dart";
 import "package:flutter_image_compress/flutter_image_compress.dart";
 import "package:logging/logging.dart";
 import "package:photo_manager/photo_manager.dart";
 import "package:photos/generated/l10n.dart";
 import 'package:photos/models/file/file.dart';
-import "package:photos/service_locator.dart";
 import "package:photos/services/sync/sync_service.dart";
 import "package:photos/ui/notification/toast.dart";
 import "package:photos/ui/tools/collage/collage_app_bar.dart";
@@ -15,7 +15,6 @@ import "package:photos/ui/tools/collage/collage_with_six_items.dart";
 import "package:photos/ui/tools/collage/collage_with_three_items.dart";
 import "package:photos/ui/tools/collage/collage_with_two_items.dart";
 import "package:photos/ui/viewer/file/detail_page.dart";
-import "package:photos/utils/navigation_util.dart";
 import "package:widgets_to_image/widgets_to_image.dart";
 
 class CollageCreatorPage extends StatefulWidget {
@@ -38,7 +37,6 @@ class _CollageCreatorPageState extends State<CollageCreatorPage> {
   WidgetsToImageController? _controller;
   bool _isSaving = false;
   VoidCallback? _clearSwapSelection;
-  late final bool _enableInternalLayouts = flagService.internalUser;
 
   void _onControllerReady(WidgetsToImageController controller) {
     setState(() {
@@ -125,7 +123,6 @@ class _CollageCreatorPageState extends State<CollageCreatorPage> {
           widget.files[1],
           onControllerReady: _onControllerReady,
           onSelectionClearSetter: (fn) => _clearSwapSelection = fn,
-          enableExtendedLayouts: _enableInternalLayouts,
         );
         break;
       case 3:
@@ -135,7 +132,6 @@ class _CollageCreatorPageState extends State<CollageCreatorPage> {
           widget.files[2],
           onControllerReady: _onControllerReady,
           onSelectionClearSetter: (fn) => _clearSwapSelection = fn,
-          enableExtendedLayouts: _enableInternalLayouts,
         );
         break;
       case 4:
@@ -146,7 +142,6 @@ class _CollageCreatorPageState extends State<CollageCreatorPage> {
           widget.files[3],
           onControllerReady: _onControllerReady,
           onSelectionClearSetter: (fn) => _clearSwapSelection = fn,
-          enableExtendedLayouts: _enableInternalLayouts,
         );
         break;
       case 5:

@@ -12,29 +12,32 @@ import 'package:photos/db/file_updation_db.dart';
 import 'package:photos/db/files_db.dart';
 import 'package:photos/events/backup_folders_updated_event.dart';
 import 'package:photos/events/collection_updated_event.dart';
-import "package:photos/events/diff_sync_complete_event.dart";
+import 'package:photos/events/diff_sync_complete_event.dart';
 import 'package:photos/events/files_updated_event.dart';
 import 'package:photos/events/force_reload_home_gallery_event.dart';
 import 'package:photos/events/local_photos_updated_event.dart';
 import 'package:photos/events/sync_status_update_event.dart';
-import "package:photos/main.dart" show isProcessBg;
+import 'package:photos/main.dart' show isProcessBg;
 import 'package:photos/models/device_collection.dart';
-import "package:photos/models/file/extensions/file_props.dart";
+import 'package:photos/models/file/extensions/file_props.dart';
 import 'package:photos/models/file/file.dart';
 import 'package:photos/models/file/file_type.dart';
 import 'package:photos/models/upload_strategy.dart';
-import "package:photos/service_locator.dart";
+import 'package:photos/service_locator.dart';
 import 'package:photos/services/app_lifecycle_service.dart';
 import 'package:photos/services/collections_service.dart';
 import 'package:photos/services/hidden_service.dart';
 import 'package:photos/services/ignored_files_service.dart';
-import "package:photos/services/language_service.dart";
+import 'package:photos/services/language_service.dart';
 import 'package:photos/services/local_file_update_service.dart';
-import "package:photos/services/notification_service.dart";
+import 'package:photos/services/notification_service.dart';
+import 'package:photos/services/social_notification_coordinator.dart';
+import 'package:photos/services/social_sync_service.dart';
 import 'package:photos/services/sync/diff_fetcher.dart';
 import 'package:photos/services/sync/sync_service.dart';
 import 'package:photos/utils/file_uploader.dart';
 import 'package:photos/utils/file_util.dart';
+import 'package:photos/utils/network_util.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class RemoteSyncService {
@@ -51,6 +54,7 @@ class RemoteSyncService {
   late SharedPreferences _prefs;
   Completer<void>? _existingSync;
   bool _isExistingSyncSilent = false;
+  StreamSubscription<LocalPhotosUpdatedEvent>? _localPhotosUpdatedSubscription;
 
   // _hasCleanupStaleEntry is used to track if we have already cleaned up
   // statle db entries in this sync session.
@@ -76,7 +80,6 @@ class RemoteSyncService {
   static const kEditTimeFeatureReleaseTime = 1635460000000000;
 
   static const kMaximumPermissibleUploadsInThrottledMode = 4;
-
   static final RemoteSyncService instance =
       RemoteSyncService._privateConstructor();
 
@@ -85,7 +88,9 @@ class RemoteSyncService {
   void init(SharedPreferences preferences) {
     _prefs = preferences;
 
-    Bus.instance.on<LocalPhotosUpdatedEvent>().listen((event) async {
+    _localPhotosUpdatedSubscription?.cancel();
+    _localPhotosUpdatedSubscription =
+        Bus.instance.on<LocalPhotosUpdatedEvent>().listen((event) async {
       if (event.type == EventType.addedOrUpdated) {
         if (_existingSync == null) {
           // ignore: unawaited_futures
@@ -117,26 +122,43 @@ class RemoteSyncService {
     );
 
     try {
+      final canPrepareUploadsInBackground =
+          !isProcessBg || await canUseHighBandwidth();
+
       // use flag to decide if we should start marking files for upload before
       // remote-sync is done. This is done to avoid adding existing files to
       // the same or different collection when user had already uploaded them
       // before.
       final bool hasSyncedBefore = _prefs.containsKey(_isFirstRemoteSyncDone);
-      if (hasSyncedBefore) {
+      if (hasSyncedBefore && canPrepareUploadsInBackground) {
         await syncDeviceCollectionFilesForUpload();
       }
       await _pullDiff();
       await trashSyncService.syncTrash();
       await _collectionsService.movePendingRemovalActionsToUncategorized();
+
+      // Sync social data immediately after diff sync, before uploads
+      if (AppLifecycleService.instance.isForeground) {
+        _socialSync().ignore();
+      } else {
+        await _socialSync();
+      }
+
       if (!hasSyncedBefore) {
         await _prefs.setBool(_isFirstRemoteSyncDone, true);
-        await syncDeviceCollectionFilesForUpload();
+        if (canPrepareUploadsInBackground) {
+          await syncDeviceCollectionFilesForUpload();
+        }
       }
 
       if (
           // We don't need syncFDStatus here if in background
           !isProcessBg) {
         fileDataService.syncFDStatus().ignore();
+      }
+
+      if (!canPrepareUploadsInBackground) {
+        throw WiFiUnavailableError();
       }
 
       final filesToBeUploaded = await _getFilesToBeUploaded();
@@ -995,56 +1017,95 @@ class RemoteSyncService {
     });
   }
 
-  bool _shouldShowNotification(int collectionID) {
+  bool _shouldShowSharedPhotosAndAlbumsNotification(int collectionID) {
     // TODO: Add option to opt out of notifications for a specific collection
     // Screen: https://www.figma.com/file/SYtMyLBs5SAOkTbfMMzhqt/ente-Visual-Design?type=design&node-id=7689-52943&t=IyWOfh0Gsb0p7yVC-4
     final isForeground = AppLifecycleService.instance.isForeground;
-    final bool showNotification =
-        NotificationService.instance.shouldShowNotificationsForSharedPhotos() &&
-            isFirstRemoteSyncDone() &&
-            !isForeground;
+    final bool shouldShowSharedPhotosAndAlbumsNotification = NotificationService
+            .instance
+            .shouldShowNotificationsForSharedPhotosAndAlbums() &&
+        isFirstRemoteSyncDone() &&
+        !isForeground;
     _logger.info(
-      "[Collection-$collectionID] shouldShow notification: $showNotification, "
+      "[Collection-$collectionID] shouldShow notification: "
+      "$shouldShowSharedPhotosAndAlbumsNotification, "
       "isAppInForeground: $isForeground",
     );
-    return showNotification;
+    return shouldShowSharedPhotosAndAlbumsNotification;
   }
 
   Future<void> _notifyNewFiles(List<int> collectionIDs) async {
-    final userID = Configuration.instance.getUserID();
     final appOpenTime = AppLifecycleService.instance.getLastAppOpenTime();
     for (final collectionID in collectionIDs) {
-      if (!_shouldShowNotification(collectionID)) {
+      if (!_shouldShowSharedPhotosAndAlbumsNotification(collectionID)) {
         continue;
       }
       final files =
           await _db.getNewFilesInCollection(collectionID, appOpenTime);
-      final Set<int> sharedFilesIDs = {};
-      final Set<int> collectedFilesIDs = {};
+      final Set<int> collectedFileIDs = {};
       for (final file in files) {
-        if (file.isUploaded && file.ownerID != userID) {
-          sharedFilesIDs.add(file.uploadedFileID!);
-        } else if (file.isUploaded && file.isCollect) {
-          collectedFilesIDs.add(file.uploadedFileID!);
+        if (file.isUploaded && file.isCollect && file.uploadedFileID != null) {
+          collectedFileIDs.add(file.uploadedFileID!);
         }
       }
-      final totalCount = sharedFilesIDs.length + collectedFilesIDs.length;
+      final totalCount = collectedFileIDs.length;
       if (totalCount > 0) {
         final collection = _collectionsService.getCollectionByID(collectionID);
         _logger.info(
           'creating notification for ${collection?.displayName} '
-          'shared: $sharedFilesIDs, collected: $collectedFilesIDs files',
+          'collected: $collectedFileIDs files',
         );
         final s = await LanguageService.locals;
         // ignore: unawaited_futures
-        NotificationService.instance.showNotification(
-          collection!.displayName,
-          totalCount.toString() + s.newPhotosEmoji,
-          channelID: "collection:" + collectionID.toString(),
+        _showNotificationSafely(
+          title: collection!.displayName,
+          message: "$totalCount${s.newPhotosEmoji}",
+          channelID: "collection:$collectionID",
           channelName: collection.displayName,
-          payload: "ente://collection/?collectionID=" + collectionID.toString(),
+          payload: "ente://collection/?collectionID=$collectionID",
+          context: 'collection=$collectionID',
         );
       }
+    }
+  }
+
+  Future<void> _showNotificationSafely({
+    required String title,
+    required String message,
+    int? id,
+    required String channelID,
+    required String channelName,
+    required String payload,
+    required String context,
+  }) async {
+    try {
+      await NotificationService.instance.showNotification(
+        title,
+        message,
+        channelID: channelID,
+        channelName: channelName,
+        payload: payload,
+        id: id,
+      );
+    } catch (e, stackTrace) {
+      _logger.severe(
+        "Failed to show notification ($context)",
+        e,
+        stackTrace,
+      );
+    }
+  }
+
+  /// Syncs social data and triggers notifications if needed.
+  Future<void> _socialSync() async {
+    try {
+      _logger.info("Starting social sync");
+      await SocialSyncService.instance.syncAllSharedCollections();
+      await SocialNotificationCoordinator.instance.notifyAfterSocialSync(
+        trigger: SocialNotificationTrigger.remoteSync,
+      );
+    } catch (e) {
+      _logger.severe("Social sync failed, continuing", e);
     }
   }
 }

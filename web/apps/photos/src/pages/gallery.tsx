@@ -2,18 +2,22 @@
 // the file it depends on have been audited and their interfaces fixed).
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-floating-promises */
+import { Upload01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import FileUploadOutlinedIcon from "@mui/icons-material/FileUploadOutlined";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import MenuIcon from "@mui/icons-material/Menu";
 import { IconButton, Link, Stack, Typography } from "@mui/material";
 import type { AddToAlbumPhase } from "components/AlbumAddedNotification";
 import { AlbumAddedNotification } from "components/AlbumAddedNotification";
 import { AuthenticateUser } from "components/AuthenticateUser";
 import { GalleryBarAndListHeader } from "components/Collections/GalleryBarAndListHeader";
+import { PickCoverPhotoDialog } from "components/Collections/PickCoverPhotoDialog";
 import { DownloadStatusNotifications } from "components/DownloadStatusNotifications";
 import type { FileListHeaderOrFooter } from "components/FileList";
 import { FileListWithViewer } from "components/FileListWithViewer";
 import { FixCreationTime } from "components/FixCreationTime";
+import { QuickLinkCreatedNotification } from "components/QuickLinkCreatedNotification";
 import { Sidebar } from "components/Sidebar";
 import { Upload } from "components/Upload";
 import { sessionExpiredDialogAttributes } from "ente-accounts/components/utils/dialog";
@@ -24,6 +28,7 @@ import {
 import { stashRedirect } from "ente-accounts/services/redirect";
 import { isSessionInvalid } from "ente-accounts/services/session";
 import { ensureLocalUser } from "ente-accounts/services/user";
+import { isDesktop } from "ente-base/app";
 import type { MiniDialogAttributes } from "ente-base/components/MiniDialog";
 import { NavbarBase } from "ente-base/components/Navbar";
 import { SingleInputDialog } from "ente-base/components/SingleInputDialog";
@@ -35,6 +40,7 @@ import { errorDialogAttributes } from "ente-base/components/utils/dialog";
 import { useIsSmallWidth } from "ente-base/components/utils/hooks";
 import { useModalVisibility } from "ente-base/components/utils/modal";
 import { useBaseContext } from "ente-base/context";
+import { subscribeMainWindowFocus } from "ente-base/electron";
 import log from "ente-base/log";
 import {
     clearSessionStorage,
@@ -42,21 +48,24 @@ import {
     masterKeyFromSession,
 } from "ente-base/session";
 import { savedAuthToken } from "ente-base/token";
+import type { Location } from "ente-base/types";
 import { FullScreenDropZone } from "ente-gallery/components/FullScreenDropZone";
 import { type UploadTypeSelectorIntent } from "ente-gallery/components/Upload";
 import { useSaveGroups } from "ente-gallery/components/utils/save-groups";
 import { type FileViewerInitialSidebar } from "ente-gallery/components/viewer/FileViewer";
-import { type Collection } from "ente-media/collection";
+import { CollectionSubType, type Collection } from "ente-media/collection";
 import { type EnteFile } from "ente-media/file";
-import { type ItemVisibility } from "ente-media/file-metadata";
+import { ItemVisibility } from "ente-media/file-metadata";
 import {
     hasPendingAlbumToJoin,
     processPendingAlbumJoin,
 } from "ente-new/albums/services/join-album";
+import { AssignPersonDialog } from "ente-new/photos/components/AssignPersonDialog";
 import {
     CollectionSelector,
     type CollectionSelectorAttributes,
 } from "ente-new/photos/components/CollectionSelector";
+import { EditLocationDialog } from "ente-new/photos/components/EditLocationDialog";
 import { Export } from "ente-new/photos/components/Export";
 import { PlanSelector } from "ente-new/photos/components/PlanSelector";
 import {
@@ -88,22 +97,35 @@ import { notifyOthersFilesDialogAttributes } from "ente-new/photos/components/ut
 import { useIsOffline } from "ente-new/photos/components/utils/use-is-offline";
 import {
     usePeopleStateSnapshot,
+    useSettingsSnapshot,
     useUserDetailsSnapshot,
 } from "ente-new/photos/components/utils/use-snapshot";
+import { reauthenticateWithAppLock } from "ente-new/photos/services/app-lock";
 import { shouldShowWhatsNew } from "ente-new/photos/services/changelog";
 import {
+    addToCollection,
     addToFavoritesCollection,
     createAlbum,
+    createPublicURL,
+    createQuickLinkCollection,
     removeFromCollection,
     removeFromFavoritesCollection,
+    updateCollectionCover,
 } from "ente-new/photos/services/collection";
 import {
     haveOnlySystemCollections,
     PseudoCollectionID,
 } from "ente-new/photos/services/collection-summary";
 import exportService from "ente-new/photos/services/export";
-import { updateFilesVisibility } from "ente-new/photos/services/file";
-import { addManualFileAssignmentsToPerson } from "ente-new/photos/services/ml";
+import {
+    updateFilesLocation,
+    updateFilesVisibility,
+} from "ente-new/photos/services/file";
+import {
+    addManualFileAssignmentsToPerson,
+    isMLEnabled,
+} from "ente-new/photos/services/ml";
+
 import {
     savedCollectionFiles,
     savedCollections,
@@ -129,6 +151,7 @@ import {
     verifyStripeSubscription,
 } from "ente-new/photos/services/user-details";
 import { usePhotosAppContext } from "ente-new/photos/types/context";
+import type { FileContextAction } from "ente-new/photos/utils/file-actions";
 import { PromiseQueue } from "ente-utils/promise";
 import { t } from "i18next";
 import { useRouter, type NextRouter } from "next/router";
@@ -136,11 +159,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileWithPath } from "react-dropzone";
 import { Trans } from "react-i18next";
 import { uploadManager } from "services/upload-manager";
+import watcher from "services/watch";
 import {
     getSelectedFiles,
     performFileOp,
     type SelectedState,
 } from "utils/file";
+import { quickLinkNameForFiles, resolveQuickLinkURL } from "utils/quick-link";
 
 /**
  * The default view for logged in users.
@@ -157,13 +182,20 @@ import {
  */
 const Page: React.FC = () => {
     const { logout, showMiniDialog, onGenericError } = useBaseContext();
-    const { showLoadingBar, hideLoadingBar, watchFolderView } =
-        usePhotosAppContext();
+    const {
+        showLoadingBar,
+        hideLoadingBar,
+        watchFolderView,
+        showNotification,
+    } = usePhotosAppContext();
 
     const isOffline = useIsOffline();
     const [state, dispatch] = useGalleryReducer();
 
     const [isFirstLoad, setIsFirstLoad] = useState(false);
+    const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+    const [suppressContextSelectionBar, setSuppressContextSelectionBar] =
+        useState(false);
     const [selected, setSelected] = useState<SelectedState>({
         ownCount: 0,
         count: 0,
@@ -221,8 +253,28 @@ const Page: React.FC = () => {
     const [collectionSelectorAttributes, setCollectionSelectorAttributes] =
         useState<CollectionSelectorAttributes | undefined>();
 
+    const { customDomain } = useSettingsSnapshot();
     const userDetails = useUserDetailsSnapshot();
     const peopleState = usePeopleStateSnapshot();
+
+    // Modal visibility for the context menu "Add Person" action
+    const {
+        show: showContextMenuAssignPerson,
+        props: contextMenuAssignPersonProps,
+    } = useModalVisibility();
+
+    // Named people available for assignment (used by context menu)
+    const namedPeople = useMemo(
+        () =>
+            (peopleState?.visiblePeople ?? []).filter(
+                (p) => p.type == "cgroup" && !!p.name,
+            ),
+        [peopleState],
+    );
+    const showAddPersonAction = useMemo(
+        () => isMLEnabled() && namedPeople.length > 0,
+        [namedPeople],
+    );
 
     const { saveGroups, onAddSaveGroup, onRemoveSaveGroup } = useSaveGroups();
     const [, setPostCreateAlbumOp] = useState<CollectionOp | undefined>(
@@ -257,6 +309,12 @@ const Page: React.FC = () => {
     } = useModalVisibility();
     const { show: showAlbumNameInput, props: albumNameInputVisibilityProps } =
         useModalVisibility();
+    const { show: showEditLocation, props: editLocationVisibilityProps } =
+        useModalVisibility();
+    const {
+        show: showPickCoverPhotoDialog,
+        props: pickCoverPhotoDialogVisibilityProps,
+    } = useModalVisibility();
 
     // Progress UI state for single-file add-to-album from the FileViewer
     const [addToAlbumProgress, setAddToAlbumProgress] = useState<{
@@ -265,13 +323,17 @@ const Page: React.FC = () => {
         albumId?: number;
         albumName?: string;
     }>({ open: false, phase: "processing" });
+    const [publicLinkToast, setPublicLinkToast] = useState<{
+        open: boolean;
+        url?: string;
+    }>({ open: false });
 
     const onAuthenticateCallback = useRef<(() => void) | undefined>(undefined);
     const onAuthenticateCancelCallback = useRef<(() => void) | undefined>(
         undefined,
     );
 
-    const authenticateUser = useCallback(
+    const authenticateUserWithPasswordModal = useCallback(
         () =>
             new Promise<void>((resolve, reject) => {
                 onAuthenticateCallback.current = resolve;
@@ -280,6 +342,18 @@ const Page: React.FC = () => {
             }),
         [],
     );
+
+    const authenticateUser = useCallback(async () => {
+        if (!isDesktop) return authenticateUserWithPasswordModal();
+
+        const reauthResult = await reauthenticateWithAppLock();
+        if (reauthResult === "authenticated") return;
+        if (reauthResult === "cancelled") {
+            throw new Error("app_lock_reauthentication_cancelled");
+        }
+
+        return authenticateUserWithPasswordModal();
+    }, [authenticateUserWithPasswordModal]);
 
     const handleCloseAuthenticateUser = useCallback(() => {
         authenticateUserVisibilityProps.onClose();
@@ -317,6 +391,9 @@ const Page: React.FC = () => {
         collectionNameByID,
         fileNormalCollectionIDs,
         normalCollectionSummaries,
+        hiddenFileIDs,
+        tempDeletedFileIDs,
+        tempHiddenFileIDs,
         pendingFavoriteUpdates,
         pendingVisibilityUpdates,
         isInSearchMode,
@@ -339,6 +416,65 @@ const Page: React.FC = () => {
         state.view?.type == "people" ? state.view.activePerson : undefined;
     const activePersonID = activePerson?.id;
 
+    /**
+     * the below function is used to conditionallay render the setCover option in the dropdown
+     */
+    const isOwnedAlbumEligibleForCover = useMemo(() => {
+        if (
+            isInSearchMode ||
+            !activeCollection ||
+            !activeCollectionSummary ||
+            !user
+        )
+            return false;
+
+        if (activeCollection.owner.id != user.id) return false;
+        if (
+            activeCollection.magicMetadata?.data.subType ==
+            CollectionSubType.quicklink
+        ) {
+            return false;
+        }
+
+        return (
+            activeCollectionSummary.attributes.has("album") ||
+            activeCollectionSummary.attributes.has("folder")
+        );
+    }, [isInSearchMode, activeCollection, activeCollectionSummary, user]);
+
+    const activeCollectionFiles = useMemo(() => {
+        if (!activeCollection) return [];
+        if (barMode == "hidden-albums") return filteredFiles;
+
+        return filteredFiles.filter(({ id, magicMetadata }) => {
+            const visibility = magicMetadata?.data.visibility;
+            const isVisible =
+                visibility === undefined ||
+                visibility === ItemVisibility.visible;
+
+            return (
+                isVisible &&
+                !hiddenFileIDs.has(id) &&
+                !tempDeletedFileIDs.has(id) &&
+                !tempHiddenFileIDs.has(id)
+            );
+        });
+    }, [
+        activeCollection,
+        barMode,
+        filteredFiles,
+        hiddenFileIDs,
+        tempDeletedFileIDs,
+        tempHiddenFileIDs,
+    ]);
+    const selectedFilesInView = useMemo(
+        () => getSelectedFiles(selected, filteredFiles),
+        [selected, filteredFiles],
+    );
+    const isAllSelectedInView =
+        filteredFiles.length > 0 &&
+        selectedFilesInView.length === filteredFiles.length;
+
     // TODO: Move into reducer
     const barCollectionSummaries = useMemo(
         () =>
@@ -359,6 +495,7 @@ const Page: React.FC = () => {
     useEffect(() => {
         const electron = globalThis.electron;
         let syncIntervalID: ReturnType<typeof setInterval> | undefined;
+        let unsubscribeMainWindowFocus: (() => void) | undefined;
 
         void (async () => {
             if (!haveMasterKeyInSession() || !(await savedAuthToken())) {
@@ -452,14 +589,17 @@ const Page: React.FC = () => {
             );
 
             if (electron) {
-                electron.onMainWindowFocus(() => remotePull({ silent: true }));
+                unsubscribeMainWindowFocus = subscribeMainWindowFocus(() => {
+                    remotePull({ silent: true });
+                    void watcher.checkAccessibility();
+                });
                 if (await shouldShowWhatsNew(electron)) showWhatsNew();
             }
         })();
 
         return () => {
             clearInterval(syncIntervalID);
-            if (electron) electron.onMainWindowFocus(undefined);
+            unsubscribeMainWindowFocus?.();
         };
     }, []);
 
@@ -574,12 +714,40 @@ const Page: React.FC = () => {
             exportVisibilityProps.open ||
             authenticateUserVisibilityProps.open ||
             albumNameInputVisibilityProps.open ||
+            pickCoverPhotoDialogVisibilityProps.open ||
             isFileViewerOpen
         ) {
             return;
         }
 
         // Create a selection with everything based on the current context.
+        const selected = {
+            ownCount: 0,
+            count: 0,
+            collectionID: activeCollectionID,
+            context:
+                barMode == "people" && activePersonID
+                    ? { mode: "people" as const, personID: activePersonID }
+                    : {
+                          mode: barMode as "albums" | "hidden-albums",
+                          collectionID: activeCollectionID!,
+                      },
+        };
+
+        filteredFiles.forEach((item) => {
+            if (item.ownerID === user.id) {
+                selected.ownCount++;
+            }
+            selected.count++;
+            // @ts-expect-error Selection code needs type fixing
+            selected[item.id] = true;
+        });
+        setSelected(selected);
+    };
+
+    const handleSelectAll = () => {
+        if (!user || !filteredFiles.length) return;
+
         const selected = {
             ownCount: 0,
             count: 0,
@@ -861,69 +1029,176 @@ const Page: React.FC = () => {
         [createOnSelectForCollectionOp, remotePull],
     );
 
-    const createFileOpHandler = (op: FileOp) => () => {
-        void (async () => {
+    const createFileOpHandler =
+        (op: FileOp, options?: { suppressSelectionBar?: boolean }) => () => {
+            void (async () => {
+                if (options?.suppressSelectionBar) {
+                    setSuppressContextSelectionBar(true);
+                }
+                showLoadingBar();
+                try {
+                    if (op == "sendLink") {
+                        const selectedFiles = getSelectedFiles(
+                            selected,
+                            filteredFiles,
+                        );
+                        const ownedSelectedFiles = selectedFiles.filter(
+                            // There'll be a user if files are being selected.
+                            (file) => file.ownerID == user!.id,
+                        );
+                        if (!ownedSelectedFiles.length) return;
+                        if (ownedSelectedFiles.length != selectedFiles.length) {
+                            showMiniDialog(notifyOthersFilesDialogAttributes());
+                        }
+
+                        const quickLinkCollection =
+                            await createQuickLinkCollection(
+                                quickLinkNameForFiles(ownedSelectedFiles),
+                            );
+                        await addToCollection(
+                            quickLinkCollection,
+                            ownedSelectedFiles,
+                        );
+                        const publicURL = await createPublicURL(
+                            quickLinkCollection.id,
+                            { enableJoin: false },
+                        );
+                        const resolvedURL = await resolveQuickLinkURL(
+                            publicURL.url,
+                            quickLinkCollection.key,
+                            customDomain,
+                        );
+                        setPublicLinkToast({ open: true, url: resolvedURL });
+
+                        clearSelection();
+                        await remotePull({ silent: true });
+                        return;
+                    }
+
+                    // When hiding use all non-hidden files instead of the filtered
+                    // files since we want to move all files copies to the hidden
+                    // collection.
+                    const opFiles =
+                        op == "hide"
+                            ? state.collectionFiles.filter(
+                                  (f) => !state.hiddenFileIDs.has(f.id),
+                              )
+                            : filteredFiles;
+                    const selectedFiles = getSelectedFiles(selected, opFiles);
+                    const ownedSelectedFiles =
+                        op == "download"
+                            ? selectedFiles
+                            : selectedFiles.filter(
+                                  // There'll be a user if files are being selected.
+                                  (file) => file.ownerID == user!.id,
+                              );
+                    const toProcessFiles =
+                        op == "unfavorite"
+                            ? ownedSelectedFiles.filter((file) =>
+                                  favoriteFileIDs.has(file.id),
+                              )
+                            : ownedSelectedFiles;
+                    if (toProcessFiles.length > 0) {
+                        await performFileOp(
+                            op,
+                            toProcessFiles,
+                            onAddSaveGroup,
+                            handleMarkTempDeleted,
+                            () => dispatch({ type: "clearTempDeleted" }),
+                            (files) =>
+                                dispatch({ type: "markTempHidden", files }),
+                            () => dispatch({ type: "clearTempHidden" }),
+                            (files) => {
+                                setFixCreationTimeFiles(files);
+                                showFixCreationTime();
+                            },
+                        );
+                    }
+                    // Apart from download, the other operations currently only work
+                    // on the user's own files.
+                    //
+                    // See: [Note: Add and move of non-user files].
+                    if (
+                        op != "download" &&
+                        ownedSelectedFiles.length != selectedFiles.length
+                    ) {
+                        showMiniDialog(notifyOthersFilesDialogAttributes());
+                    }
+                    clearSelection();
+                    await remotePull({ silent: true });
+                } catch (e) {
+                    onGenericError(e);
+                } finally {
+                    if (options?.suppressSelectionBar) {
+                        setSuppressContextSelectionBar(false);
+                    }
+                    hideLoadingBar();
+                }
+            })();
+        };
+
+    const handleAddPersonToSelectedFiles = useCallback(
+        async (personID: string) => {
             showLoadingBar();
             try {
-                // When hiding use all non-hidden files instead of the filtered
-                // files since we want to move all files copies to the hidden
-                // collection.
-                const opFiles =
-                    op == "hide"
-                        ? state.collectionFiles.filter(
-                              (f) => !state.hiddenFileIDs.has(f.id),
-                          )
-                        : filteredFiles;
-                const selectedFiles = getSelectedFiles(selected, opFiles);
-                const toProcessFiles =
-                    op == "download"
-                        ? selectedFiles
-                        : selectedFiles.filter(
-                              // There'll be a user if files are being selected.
-                              (file) => file.ownerID == user!.id,
-                          );
-                if (toProcessFiles.length > 0) {
-                    await performFileOp(
-                        op,
-                        toProcessFiles,
-                        onAddSaveGroup,
-                        handleMarkTempDeleted,
-                        () => dispatch({ type: "clearTempDeleted" }),
-                        (files) => dispatch({ type: "markTempHidden", files }),
-                        () => dispatch({ type: "clearTempHidden" }),
-                        (files) => {
-                            setFixCreationTimeFiles(files);
-                            showFixCreationTime();
-                        },
-                    );
-                }
-                // Apart from download, the other operations currently only work
-                // on the user's own files.
-                //
-                // See: [Note: Add and move of non-user files].
-                if (toProcessFiles.length != selectedFiles.length) {
-                    showMiniDialog(notifyOthersFilesDialogAttributes());
-                }
+                const selectedFiles = getSelectedFiles(selected, filteredFiles);
+                await addManualFileAssignmentsToPerson(
+                    personID,
+                    selectedFiles.map((f) => f.id),
+                );
                 clearSelection();
-                await remotePull({ silent: true });
+                const personName = namedPeople.find(
+                    (p) => p.id === personID,
+                )?.name;
+                showNotification({
+                    color: "secondary",
+                    startIcon: <CheckCircleIcon />,
+                    title: t("added_to_person"),
+                    caption: personName,
+                });
             } catch (e) {
                 onGenericError(e);
             } finally {
                 hideLoadingBar();
             }
-        })();
-    };
-
-    const handleAddPersonToSelectedFiles = useCallback(
-        async (personID: string) => {
-            const selectedFiles = getSelectedFiles(selected, filteredFiles);
-            await addManualFileAssignmentsToPerson(
-                personID,
-                selectedFiles.map((f) => f.id),
-            );
-            clearSelection();
         },
-        [selected, filteredFiles, clearSelection],
+        [
+            selected,
+            filteredFiles,
+            clearSelection,
+            showNotification,
+            namedPeople,
+            showLoadingBar,
+            hideLoadingBar,
+            onGenericError,
+        ],
+    );
+
+    // Handler for selecting a person from the context menu assign person dialog
+    const handleContextMenuSelectPerson = useCallback(
+        (personID: string) => {
+            contextMenuAssignPersonProps.onClose();
+            void handleAddPersonToSelectedFiles(personID);
+        },
+        [contextMenuAssignPersonProps, handleAddPersonToSelectedFiles],
+    );
+
+    const handleEditLocationConfirm = useCallback(
+        async (location: Location) => {
+            // Only update files owned by the user
+            const userFiles = selectedFilesInView.filter(
+                (f) => f.ownerID == user!.id,
+            );
+            if (userFiles.length > 0) {
+                await updateFilesLocation(
+                    userFiles,
+                    location.latitude,
+                    location.longitude,
+                );
+            }
+            void remotePull({ silent: true });
+        },
+        [selectedFilesInView, user, remotePull],
     );
 
     const handleSelectSearchOption = (
@@ -1107,6 +1382,43 @@ const Page: React.FC = () => {
         [],
     );
 
+    const handleFileViewerSendLink = useCallback(
+        async (file: EnteFile) => {
+            if (file.ownerID != user?.id) return;
+
+            showLoadingBar();
+            try {
+                const quickLinkCollection = await createQuickLinkCollection(
+                    quickLinkNameForFiles([file]),
+                );
+                await addToCollection(quickLinkCollection, [file]);
+                const publicURL = await createPublicURL(
+                    quickLinkCollection.id,
+                    { enableJoin: false },
+                );
+                const resolvedURL = await resolveQuickLinkURL(
+                    publicURL.url,
+                    quickLinkCollection.key,
+                    customDomain,
+                );
+                setPublicLinkToast({ open: true, url: resolvedURL });
+                await remotePull({ silent: true });
+            } catch (e) {
+                onGenericError(e);
+            } finally {
+                hideLoadingBar();
+            }
+        },
+        [
+            user?.id,
+            showLoadingBar,
+            hideLoadingBar,
+            customDomain,
+            remotePull,
+            onGenericError,
+        ],
+    );
+
     const handleMarkTempDeleted = useCallback(
         (files: EnteFile[]) => dispatch({ type: "markTempDeleted", files }),
         [],
@@ -1132,6 +1444,254 @@ const Page: React.FC = () => {
             setOpenCollectionSelector(true);
         },
         [],
+    );
+
+    const selectedCount = selected.count;
+    const selectedOwnCount = selected.ownCount;
+    const selectedFavoriteCount = useMemo(() => {
+        if (selected.count == 0) return 0;
+        let count = 0;
+        for (const [key, value] of Object.entries(selected)) {
+            if (typeof value === "boolean" && value) {
+                if (favoriteFileIDs.has(Number(key))) {
+                    count += 1;
+                }
+            }
+        }
+        return count;
+    }, [favoriteFileIDs, selected]);
+
+    const handleUpdateCollectionCover = useCallback(
+        async (coverID: number) => {
+            if (!activeCollection || !isOwnedAlbumEligibleForCover)
+                return false;
+
+            showLoadingBar();
+            try {
+                await updateCollectionCover(activeCollection, coverID);
+                await remotePull({ silent: true });
+                return true;
+            } catch (e) {
+                onGenericError(e);
+                return false;
+            } finally {
+                hideLoadingBar();
+            }
+        },
+        [
+            activeCollection,
+            isOwnedAlbumEligibleForCover,
+            showLoadingBar,
+            remotePull,
+            onGenericError,
+            hideLoadingBar,
+        ],
+    );
+
+    /**
+     * Handle a context menu action on a file.
+     *
+     * This handler is called when the user right-clicks on a file thumbnail
+     * and selects an action from the context menu.
+     */
+    const handleContextMenuAction = useCallback(
+        (
+            action: FileContextAction,
+            _targetFile?: EnteFile,
+            meta?: { isEphemeralSingleSelection: boolean },
+        ) => {
+            const suppressSelectionBar = !!meta?.isEphemeralSingleSelection;
+            // The selection should already be set by FileList's handleContextMenu
+            // We just need to invoke the appropriate action handler
+            switch (action) {
+                case "sendLink":
+                    createFileOpHandler("sendLink", { suppressSelectionBar })();
+                    break;
+                case "download":
+                    createFileOpHandler("download", { suppressSelectionBar })();
+                    break;
+                case "favorite":
+                    createFileOpHandler("favorite", { suppressSelectionBar })();
+                    break;
+                case "unfavorite":
+                    createFileOpHandler("unfavorite", {
+                        suppressSelectionBar,
+                    })();
+                    break;
+                case "archive":
+                    createFileOpHandler("archive", { suppressSelectionBar })();
+                    break;
+                case "unarchive":
+                    createFileOpHandler("unarchive", {
+                        suppressSelectionBar,
+                    })();
+                    break;
+                case "hide":
+                    createFileOpHandler("hide", { suppressSelectionBar })();
+                    break;
+                case "fixTime":
+                    createFileOpHandler("fixTime", { suppressSelectionBar })();
+                    break;
+                case "trash":
+                    showMiniDialog({
+                        title: t("trash_files_title"),
+                        message: t("trash_files_message"),
+                        continue: {
+                            text: t("move_to_trash"),
+                            color: "critical",
+                            action: createFileOpHandler("trash", {
+                                suppressSelectionBar,
+                            }),
+                        },
+                    });
+                    break;
+                case "deletePermanently":
+                    showMiniDialog({
+                        title: t("delete_files_title"),
+                        message: t("delete_files_message"),
+                        continue: {
+                            text: t("delete"),
+                            color: "critical",
+                            action: createFileOpHandler("deletePermanently", {
+                                suppressSelectionBar,
+                            }),
+                        },
+                    });
+                    break;
+                case "restore":
+                    handleOpenCollectionSelector({
+                        action: "restore",
+                        onCreateCollection:
+                            createOnCreateForCollectionOp("restore"),
+                        onSelectCollection:
+                            createOnSelectForCollectionOp("restore"),
+                    });
+                    break;
+                case "addToAlbum":
+                    handleOpenCollectionSelector({
+                        action: "add",
+                        sourceCollectionSummaryID: activeCollectionSummary?.id,
+                        onCreateCollection:
+                            createOnCreateForCollectionOp("add"),
+                        onSelectCollection:
+                            createOnSelectForCollectionOp("add"),
+                    });
+                    break;
+                case "moveToAlbum":
+                    handleOpenCollectionSelector({
+                        action: "move",
+                        sourceCollectionSummaryID: activeCollectionSummary?.id,
+                        onCreateCollection:
+                            createOnCreateForCollectionOp("move"),
+                        onSelectCollection:
+                            createOnSelectForCollectionOp("move"),
+                    });
+                    break;
+                case "removeFromAlbum": {
+                    if (!activeCollection) break;
+                    const isSharedIncoming =
+                        activeCollectionSummary?.attributes.has(
+                            "sharedIncoming",
+                        );
+                    const isSharedOutgoing =
+                        activeCollectionSummary?.attributes.has(
+                            "sharedOutgoing",
+                        );
+                    const isRemovingOthers = selectedCount != selectedOwnCount;
+                    const remove = () =>
+                        handleRemoveFilesFromCollection(activeCollection);
+
+                    if (isSharedIncoming) {
+                        if (isRemovingOthers) {
+                            showMiniDialog({
+                                title: t("remove_from_album"),
+                                message: t("remove_from_album_others_message"),
+                                continue: {
+                                    text: t("remove"),
+                                    color: "critical",
+                                    action: remove,
+                                },
+                                cancel: t("cancel"),
+                            });
+                        } else {
+                            remove();
+                        }
+                        break;
+                    }
+
+                    if (isSharedOutgoing && isRemovingOthers) {
+                        showMiniDialog({
+                            title: t("remove_from_album"),
+                            message: t("remove_from_album_others_message"),
+                            continue: {
+                                text: t("remove"),
+                                color: "critical",
+                                action: remove,
+                            },
+                        });
+                        break;
+                    }
+
+                    const onlyUserFiles = !isRemovingOthers;
+                    showMiniDialog({
+                        title: t("remove_from_album"),
+                        message: onlyUserFiles
+                            ? t("confirm_remove_message")
+                            : t("confirm_remove_incl_others_message"),
+                        continue: {
+                            text: t("yes_remove"),
+                            color: onlyUserFiles ? "primary" : "critical",
+                            action: remove,
+                        },
+                    });
+                    break;
+                }
+                case "unhide":
+                    handleOpenCollectionSelector({
+                        action: "unhide",
+                        onCreateCollection:
+                            createOnCreateForCollectionOp("unhide"),
+                        onSelectCollection:
+                            createOnSelectForCollectionOp("unhide"),
+                    });
+                    break;
+                case "addPerson":
+                    showContextMenuAssignPerson();
+                    break;
+                case "editLocation":
+                    showEditLocation();
+                    break;
+            }
+        },
+        [
+            createFileOpHandler,
+            createOnCreateForCollectionOp,
+            createOnSelectForCollectionOp,
+            handleOpenCollectionSelector,
+            handleRemoveFilesFromCollection,
+            showMiniDialog,
+            showContextMenuAssignPerson,
+            showEditLocation,
+            activeCollectionSummary,
+            activeCollection,
+            selectedCount,
+            selectedOwnCount,
+        ],
+    );
+
+    const handleOpenPickCoverPhotoDialog = useCallback(() => {
+        if (!isOwnedAlbumEligibleForCover) return;
+        showPickCoverPhotoDialog();
+    }, [isOwnedAlbumEligibleForCover, showPickCoverPhotoDialog]);
+
+    const handleUseSelectedCoverPhoto = useCallback(
+        async (file: EnteFile) => handleUpdateCollectionCover(file.id),
+        [handleUpdateCollectionCover],
+    );
+
+    const handleResetCollectionCover = useCallback(
+        async () => handleUpdateCollectionCover(0),
+        [handleUpdateCollectionCover],
     );
 
     const handleCloseCollectionSelector = useCallback(
@@ -1214,7 +1774,10 @@ const Page: React.FC = () => {
     );
 
     const showSelectionBar =
-        selected.count > 0 && selected.collectionID === activeCollectionID;
+        selected.count > 0 &&
+        selected.collectionID === activeCollectionID &&
+        !suppressContextSelectionBar &&
+        !(isContextMenuOpen && selected.count === 1);
 
     if (!user) {
         // Don't render until we dispatch "mount" with the logged in user.
@@ -1240,7 +1803,11 @@ const Page: React.FC = () => {
                 open={openCollectionSelector}
                 onClose={handleCloseCollectionSelector}
                 attributes={collectionSelectorAttributes}
-                collectionSummaries={normalCollectionSummaries}
+                collectionSummaries={
+                    collectionSelectorAttributes?.showHiddenCollections
+                        ? state.hiddenCollectionSummaries
+                        : normalCollectionSummaries
+                }
                 collectionForCollectionSummaryID={(id) =>
                     findCollectionCreatingUncategorizedIfNeeded(
                         state.collections,
@@ -1281,22 +1848,28 @@ const Page: React.FC = () => {
                         }
                         selectedFileCount={selected.count}
                         selectedOwnFileCount={selected.ownCount}
+                        selectedFavoriteCount={selectedFavoriteCount}
                         onClearSelection={clearSelection}
                         onRemoveFilesFromCollection={
                             handleRemoveFilesFromCollection
                         }
                         onOpenCollectionSelector={handleOpenCollectionSelector}
+                        onSelectAll={handleSelectAll}
+                        isAllSelected={isAllSelectedInView}
                         {...{
                             createOnCreateForCollectionOp,
                             createOnSelectForCollectionOp,
                             createFileOpHandler,
-                            onAddPersonToSelectedFiles:
-                                handleAddPersonToSelectedFiles,
+                            onShowAssignPersonDialog: showAddPersonAction
+                                ? showContextMenuAssignPerson
+                                : undefined,
                         }}
+                        onEditLocation={showEditLocation}
                     />
                 ) : barMode == "hidden-albums" ? (
                     <HiddenSectionNavbarContents
                         onBack={() => dispatch({ type: "showAlbums" })}
+                        onUpload={openUploader}
                     />
                 ) : (
                     <NormalNavbarContents
@@ -1333,6 +1906,8 @@ const Page: React.FC = () => {
                     fileNormalCollectionIDs,
                     collectionNameByID,
                     onSelectCollection: handleSelectCollection,
+                    canSetAlbumCover: isOwnedAlbumEligibleForCover,
+                    onSetAlbumCover: handleOpenPickCoverPhotoDialog,
                 }}
                 mode={barMode}
                 shouldHide={isInSearchMode}
@@ -1375,6 +1950,7 @@ const Page: React.FC = () => {
                 onUploadFile={(file) => dispatch({ type: "uploadFile", file })}
                 onShowPlanSelector={showPlanSelector}
                 onShowSessionExpiredDialog={showSessionExpiredDialog}
+                isInHiddenSection={barMode == "hidden-albums"}
             />
             <Sidebar
                 {...sidebarVisibilityProps}
@@ -1391,6 +1967,12 @@ const Page: React.FC = () => {
                 onAuthenticateUser={authenticateUser}
             />
             <WhatsNew {...whatsNewVisibilityProps} />
+            <AssignPersonDialog
+                {...contextMenuAssignPersonProps}
+                people={namedPeople}
+                title={t("add_a_person")}
+                onSelectPerson={handleContextMenuSelectPerson}
+            />
             {!isInSearchMode &&
             !isFirstLoad &&
             !state.collectionFiles.length &&
@@ -1426,6 +2008,11 @@ const Page: React.FC = () => {
                         "sharedIncoming",
                     )}
                     isInHiddenSection={barMode == "hidden-albums"}
+                    onContextMenuAction={handleContextMenuAction}
+                    onContextMenuOpenChange={setIsContextMenuOpen}
+                    suppressSelectionUI={suppressContextSelectionBar}
+                    showAddPersonAction={showAddPersonAction}
+                    showEditLocationAction={selected.ownCount > 0}
                     {...{
                         favoriteFileIDs,
                         collectionNameByID,
@@ -1440,6 +2027,7 @@ const Page: React.FC = () => {
                     onFileVisibilityUpdate={
                         handleFileViewerFileVisibilityUpdate
                     }
+                    onSendLink={handleFileViewerSendLink}
                     onMarkTempDeleted={handleMarkTempDeleted}
                     onSetOpenFileViewer={setIsFileViewerOpen}
                     onRemotePull={remotePull}
@@ -1454,6 +2042,20 @@ const Page: React.FC = () => {
                     onPendingNavigationConsumed={
                         handlePendingNavigationConsumed
                     }
+                />
+            )}
+            {activeCollection && (
+                <PickCoverPhotoDialog
+                    {...pickCoverPhotoDialogVisibilityProps}
+                    collection={activeCollection}
+                    files={activeCollectionFiles}
+                    user={user}
+                    canResetToDefault={
+                        (activeCollection.pubMagicMetadata?.data.coverID ?? 0) >
+                        0
+                    }
+                    onUseSelectedPhoto={handleUseSelectedCoverPhoto}
+                    onResetToDefault={handleResetCollectionCover}
                 />
             )}
             <Export {...exportVisibilityProps} {...{ collectionNameByID }} />
@@ -1476,6 +2078,17 @@ const Page: React.FC = () => {
                 }}
                 onSubmit={handleAlbumNameSubmit}
             />
+            <QuickLinkCreatedNotification
+                open={publicLinkToast.open}
+                onCopy={() => {
+                    if (publicLinkToast.url) {
+                        void navigator.clipboard.writeText(publicLinkToast.url);
+                    }
+                }}
+                onClose={() =>
+                    setPublicLinkToast((prev) => ({ ...prev, open: false }))
+                }
+            />
             <AlbumAddedNotification
                 open={addToAlbumProgress.open}
                 onClose={() =>
@@ -1483,6 +2096,11 @@ const Page: React.FC = () => {
                 }
                 phase={addToAlbumProgress.phase}
                 albumName={addToAlbumProgress.albumName}
+            />
+            <EditLocationDialog
+                {...editLocationVisibilityProps}
+                files={selectedFilesInView}
+                onConfirm={handleEditLocationConfirm}
             />
         </FullScreenDropZone>
     );
@@ -1549,7 +2167,7 @@ const UploadButton: React.FC<ButtonishProps> = ({ onClick }) => {
     const disabled = uploadManager.isUploadInProgress();
     const isSmallWidth = useIsSmallWidth();
 
-    const icon = <FileUploadOutlinedIcon />;
+    const icon = <HugeiconsIcon icon={Upload01Icon} size={20} />;
 
     return (
         <>
@@ -1559,6 +2177,7 @@ const UploadButton: React.FC<ButtonishProps> = ({ onClick }) => {
                 <FocusVisibleButton
                     color="secondary"
                     startIcon={icon}
+                    sx={{ borderRadius: "16px" }}
                     {...{ onClick, disabled }}
                 >
                     {t("upload")}
@@ -1570,11 +2189,12 @@ const UploadButton: React.FC<ButtonishProps> = ({ onClick }) => {
 
 interface HiddenSectionNavbarContentsProps {
     onBack: () => void;
+    onUpload: () => void;
 }
 
 const HiddenSectionNavbarContents: React.FC<
     HiddenSectionNavbarContentsProps
-> = ({ onBack }) => (
+> = ({ onBack, onUpload }) => (
     <Stack
         direction="row"
         sx={(theme) => ({
@@ -1588,6 +2208,7 @@ const HiddenSectionNavbarContents: React.FC<
             <ArrowBackIcon />
         </IconButton>
         <Typography sx={{ flex: 1 }}>{t("section_hidden")}</Typography>
+        <UploadButton onClick={onUpload} />
     </Stack>
 );
 

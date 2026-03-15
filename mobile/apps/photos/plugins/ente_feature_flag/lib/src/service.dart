@@ -13,9 +13,8 @@ import "model.dart";
 
 class FlagService {
   static const int _uploadV2Flag = 1 << 0;
-  static const int _commentsFlag =
-      1 << 1; // Keep in sync with server/ente/remotestore.go
   static const int _backupOptionsFlag = 1 << 2;
+  static const int _videoStreamingFlag = 1 << 3;
 
   final SharedPreferences _prefs;
   final Dio _enteDio;
@@ -51,6 +50,8 @@ class FlagService {
     return (flags.internalUser || kDebugMode) && !isDisabled;
   }
 
+  bool get cloudflareUploadWorker => internalUser;
+
   bool get betaUser => flags.betaUser;
 
   bool get internalOrBetaUser => internalUser || betaUser;
@@ -71,15 +72,15 @@ class FlagService {
 
   bool get enableVectorDb => hasGrantedMLConsent;
 
+  bool get usearchForSearch => true;
+
+  bool get usearchForSuggestions => true;
+
   String get castUrl => flags.castUrl;
 
   String get customDomain => flags.customDomain;
 
   String get embedUrl => flags.embedUrl;
-
-  bool get addToAlbumFeature => internalUser;
-
-  bool get widgetSharedAlbums => internalUser;
 
   bool get useNativeVideoEditor => true;
 
@@ -89,16 +90,21 @@ class FlagService {
   bool get facesTimeline => internalUser;
   bool get ritualsFlag => true;
 
-  bool get stopStreamProcess => internalUser;
+  bool get stopStreamProcess => true;
 
-  bool get streamEnabledByDefault => internalUser;
+  bool get streamEnabledByDefault => _isServerFlagEnabled(_videoStreamingFlag);
 
   bool get manualTagFileToPerson => hasGrantedMLConsent;
 
   bool get enableShareePin => true;
 
-  bool get isSocialEnabled =>
-      internalUser || _isServerFlagEnabled(_commentsFlag);
+  bool get useRustForML => internalUser;
+
+  bool get useRustForFaceThumbnails => internalUser;
+
+  bool get petEnabled => internalUser;
+
+  bool get qrFeatureEnabled => internalUser;
 
   Future<void> tryRefreshFlags() async {
     try {

@@ -71,6 +71,8 @@ Ente supports multiple 2FA methods for additional security:
 
 Enable 2FA in `Settings > Security` on mobile or desktop apps.
 
+Warning: if you use the same account in Ente Auth, enabling 2FA in Ente Photos also enables it for Ente Auth, which can be a problem if you store your Ente account's 2FA code inside Ente Auth itself. See [Enteception](/auth/faq/enteception/).
+
 Learn more about [Passkeys](/photos/features/account/passkeys).
 
 ### End-to-end encryption
@@ -249,7 +251,7 @@ Learn more in the [Storage optimization guide](/photos/features/albums-and-organ
 
 Earn free storage by inviting friends:
 
-- Share your referral code from `Settings > General > Referrals`
+- Share your referral code from `Settings > Referrals`
 - When friends upgrade to a paid plan, both of you get **10 GB free**
 - Maximum earned storage equals your plan size (double your storage)
 - Earned storage lasts as long as your subscription is active

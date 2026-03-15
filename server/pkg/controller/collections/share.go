@@ -5,13 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/ente-io/museum/ente"
 	"github.com/ente-io/museum/pkg/controller/access"
 	"github.com/ente-io/museum/pkg/controller/public"
 	"github.com/ente-io/museum/pkg/utils/array"
 	"github.com/ente-io/museum/pkg/utils/auth"
+	emailUtil "github.com/ente-io/museum/pkg/utils/email"
 	"github.com/ente-io/museum/pkg/utils/time"
 	"github.com/ente-io/stacktrace"
 	"github.com/gin-contrib/requestid"
@@ -23,7 +23,7 @@ func (c *CollectionController) Share(ctx *gin.Context, req ente.AlterShareReques
 	fromUserID := auth.GetUserID(ctx.Request.Header)
 	cID := req.CollectionID
 	encryptedKey := req.EncryptedKey
-	toUserEmail := strings.ToLower(strings.TrimSpace(req.Email))
+	toUserEmail := emailUtil.NormalizeEmail(req.Email)
 	// default role type
 	role := ente.VIEWER
 	if req.Role != nil {
@@ -100,7 +100,9 @@ func (c *CollectionController) JoinViaLink(ctx *gin.Context, req ente.JoinCollec
 	}
 	err = c.BillingCtrl.HasActiveSelfOrFamilySubscription(collection.Owner.ID, true)
 	if err != nil {
-		return stacktrace.Propagate(err, "")
+		if !errors.Is(err, ente.ErrSharingDisabledForFreeAccounts) {
+			return stacktrace.Propagate(err, "")
+		}
 	}
 	role := ente.VIEWER
 	if collectionLinkToken.EnableCollect {
@@ -146,7 +148,7 @@ func (c *CollectionController) UnShare(ctx *gin.Context, cID int64, fromUserID i
 	if err != nil {
 		return nil, stacktrace.Propagate(err, "")
 	}
-	if err := c.removeUserSocialActivity(ctx.Request.Context(), cID, toUserID); err != nil {
+	if err := c.removeUserSocialActivity(ctx, cID, toUserID); err != nil {
 		return nil, err
 	}
 	err = c.CastRepo.RevokeForGivenUserAndCollection(ctx, cID, toUserID)
@@ -185,7 +187,7 @@ func (c *CollectionController) Leave(ctx *gin.Context, cID int64) error {
 	if err != nil {
 		return stacktrace.Propagate(err, "")
 	}
-	if err := c.removeUserSocialActivity(ctx.Request.Context(), cID, userID); err != nil {
+	if err := c.removeUserSocialActivity(ctx, cID, userID); err != nil {
 		return err
 	}
 	return nil

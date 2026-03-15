@@ -118,7 +118,7 @@ If you're searching for objects (like "food", "car", "dog") or trying to find fa
 
 **On mobile:**
 
-Open `Settings > General > Advanced > Machine learning` and toggle ON face recognition and magic search.
+Open `Settings > Machine learning` and toggle ON face recognition and magic search.
 
 **On desktop:**
 
@@ -130,13 +130,28 @@ Open `Settings > Preferences > Machine learning` and toggle ON face recognition 
 - ✅ ML only works on desktop and mobile apps
 - Initial indexing can take time depending on library size
 
+### Why is the People section empty even though Machine Learning shows 100%? {#people-section-empty}
+
+If Machine Learning shows 100% on both Android and Desktop, the People
+section should normally populate shortly after.
+
+Try these steps first:
+
+1. Refresh the desktop app using `Ctrl + F`
+2. Log out and log back in
+3. Check if People start showing up
+
+If the People section is still empty, please
+[send logs](/photos/faq/troubleshooting#sharing-logs) from your desktop app
+so we can investigate further.
+
 ### How do I enable face recognition? {#enable-face-recognition}
 
 Face recognition requires enabling **Machine Learning** first:
 
 **On mobile:**
 
-Open `Settings > General > Advanced > Machine learning`, enable "Face recognition", and wait for indexing to complete.
+Open `Settings > Machine learning`, enable "Face recognition", and wait for indexing to complete.
 
 **On desktop:**
 
@@ -253,6 +268,17 @@ Yes! Once the app has grouped faces:
 
 You can then search for photos by person name.
 
+### How can I help improve face recognition? {#improve-face-recognition}
+
+You can help improve face grouping by reviewing and confirming suggestions:
+
+1. Open the People section
+2. Tap on a person grouping (make sure it's assigned a name)
+3. Tap "Review suggestions" from the top right menu
+4. Confirm or reject the suggested faces
+
+This helps the app learn and improve grouping accuracy for the specific person over time.
+
 ## Magic Search
 
 ### What is magic search? {#what-is-magic-search}
@@ -273,7 +299,7 @@ Magic search is enabled when you enable machine learning:
 
 **On mobile:**
 
-- `Settings > General > Advanced > Machine learning`
+- `Settings > Machine learning`
 
 **On desktop:**
 

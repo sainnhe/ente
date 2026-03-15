@@ -1,13 +1,15 @@
-import ArchiveOutlinedIcon from "@mui/icons-material/ArchiveOutlined";
-import CategoryIcon from "@mui/icons-material/Category";
+import {
+    Delete02Icon,
+    Download05Icon,
+    ViewOffSlashIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CloseIcon from "@mui/icons-material/Close";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import HealthAndSafetyIcon from "@mui/icons-material/HealthAndSafety";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import NorthEastIcon from "@mui/icons-material/NorthEast";
-import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import {
     Box,
     Dialog,
@@ -70,15 +72,23 @@ import {
 } from "ente-gallery/services/video";
 import { DeleteAccount } from "ente-new/photos/components/DeleteAccount";
 import { DropdownInput } from "ente-new/photos/components/DropdownInput";
+import { ShapeIcon } from "ente-new/photos/components/icons/ShapeIcon";
+import { AppLockSettings } from "ente-new/photos/components/sidebar/AppLockSettings";
 import { MLSettings } from "ente-new/photos/components/sidebar/MLSettings";
 import { SessionsSettings } from "ente-new/photos/components/sidebar/SessionsSettings";
 import { TwoFactorSettings } from "ente-new/photos/components/sidebar/TwoFactorSettings";
 import { downloadAppDialogAttributes } from "ente-new/photos/components/utils/download";
 import {
+    useAppLockSnapshot,
     useHLSGenerationStatusSnapshot,
     useSettingsSnapshot,
     useUserDetailsSnapshot,
 } from "ente-new/photos/components/utils/use-snapshot";
+import {
+    reauthenticateWithAppLock,
+    suppressAppLockRefreshFromSessionForTrustedReload,
+    suppressAutoLockOnBlurForTrustedPrompt,
+} from "ente-new/photos/services/app-lock";
 import {
     PseudoCollectionID,
     type CollectionSummaries,
@@ -202,6 +212,7 @@ type AccountAction = Extract<
     | "account.changePassword"
     | "account.changeEmail"
     | "account.deleteAccount"
+    | "account.sessions"
 >;
 
 type PreferencesAction = Extract<
@@ -227,6 +238,19 @@ type HelpAction = Extract<
     | "help.testUpload"
 >;
 
+type FreeUpSpaceAction = Extract<
+    SidebarActionID,
+    "freeUpSpace.deduplicate" | "freeUpSpace.largeFiles"
+>;
+
+const appLockReauthenticationCancelledMessage =
+    "app_lock_reauthentication_cancelled";
+
+const isReauthenticationCancellation = (error: unknown) =>
+    error == undefined ||
+    (error instanceof Error &&
+        error.message === appLockReauthenticationCancelledMessage);
+
 export const Sidebar: React.FC<SidebarProps> = ({
     open,
     onClose,
@@ -239,11 +263,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onShowExport,
     onAuthenticateUser,
 }) => {
-    const router = useRouter();
     const { show: showHelp, props: helpVisibilityProps } = useModalVisibility();
     const { show: showAccount, props: accountVisibilityProps } =
         useModalVisibility();
     const { show: showPreferences, props: preferencesVisibilityProps } =
+        useModalVisibility();
+    const { show: showFreeUpSpace, props: freeUpSpaceVisibilityProps } =
         useModalVisibility();
     const { watchFolderView, setWatchFolderView } = usePhotosAppContext();
     const { showMiniDialog, logout } = useBaseContext();
@@ -253,6 +278,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [pendingPreferencesAction, setPendingPreferencesAction] =
         useState<PreferencesAction>();
     const [pendingHelpAction, setPendingHelpAction] = useState<HelpAction>();
+    const [pendingFreeUpSpaceAction, setPendingFreeUpSpaceAction] =
+        useState<FreeUpSpaceAction>();
 
     const handleLogout = useCallback(
         () =>
@@ -278,6 +305,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
         [setWatchFolderView],
     );
 
+    const handleShowExport = useCallback(() => {
+        if (!isDesktop) {
+            showMiniDialog(downloadAppDialogAttributes());
+            return;
+        }
+
+        void (async () => {
+            try {
+                await onAuthenticateUser();
+                onShowExport();
+            } catch {
+                // User cancelled reauthentication.
+            }
+        })();
+    }, [onAuthenticateUser, onShowExport, showMiniDialog]);
+
     const performSidebarAction = useCallback(
         async (actionID: SidebarActionID) =>
             performSidebarRegistryAction(actionID, {
@@ -287,9 +330,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 showAccount,
                 showPreferences,
                 showHelp,
-                onShowExport,
+                showFreeUpSpace,
+                onShowExport: handleShowExport,
                 onLogout: handleLogout,
-                onRouteToDeduplicate: () => router.push("/duplicates"),
                 onShowWatchFolder: handleOpenWatchFolder,
                 pseudoIDs: {
                     uncategorized: uncategorizedCollectionSummaryID,
@@ -305,6 +348,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ),
                 setPendingHelpAction: (a) =>
                     setPendingHelpAction(a as HelpAction | undefined),
+                setPendingFreeUpSpaceAction: (a) =>
+                    setPendingFreeUpSpaceAction(
+                        a as FreeUpSpaceAction | undefined,
+                    ),
             } as SidebarActionContext),
         [
             handleLogout,
@@ -312,9 +359,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClose,
             onShowCollectionSummary,
             onShowPlanSelector,
-            onShowExport,
-            router,
+            handleShowExport,
             showAccount,
+            showFreeUpSpace,
             showHelp,
             showPreferences,
             uncategorizedCollectionSummaryID,
@@ -360,7 +407,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <UtilitySection
                     onCloseSidebar={onClose}
                     {...{
-                        onShowExport,
+                        onShowExport: handleShowExport,
                         onAuthenticateUser,
                         showAccount,
                         accountVisibilityProps,
@@ -368,6 +415,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         preferencesVisibilityProps,
                         showHelp,
                         helpVisibilityProps,
+                        showFreeUpSpace,
+                        freeUpSpaceVisibilityProps,
                         watchFolderView,
                         onShowWatchFolder: handleOpenWatchFolder,
                         onCloseWatchFolder: handleCloseWatchFolder,
@@ -377,9 +426,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onPreferencesActionHandled: setPendingPreferencesAction,
                         pendingHelpAction,
                         onHelpActionHandled: setPendingHelpAction,
-                        onRouteToDeduplicate: () => {
-                            void router.push("/duplicates");
-                        },
+                        pendingFreeUpSpaceAction,
+                        onFreeUpSpaceActionHandled: setPendingFreeUpSpaceAction,
                     }}
                 />
                 <Divider sx={{ my: "2px" }} />
@@ -689,6 +737,8 @@ const ShortcutSection: React.FC<ShortcutSectionProps> = ({
     uncategorizedCollectionSummaryID,
     onShowCollectionSummary,
 }) => {
+    const shortcutIconSize = 20;
+
     const handleOpenUncategorizedSection = () =>
         void onShowCollectionSummary(uncategorizedCollectionSummaryID).then(
             onCloseSidebar,
@@ -716,19 +766,29 @@ const ShortcutSection: React.FC<ShortcutSectionProps> = ({
     return (
         <>
             <RowButton
-                startIcon={<CategoryIcon />}
+                startIcon={<ShapeIcon />}
                 label={t("section_uncategorized")}
                 caption={summaryCaption(uncategorizedCollectionSummaryID)}
                 onClick={handleOpenUncategorizedSection}
             />
             <RowButton
-                startIcon={<ArchiveOutlinedIcon />}
+                startIcon={
+                    <HugeiconsIcon
+                        icon={Download05Icon}
+                        size={shortcutIconSize}
+                    />
+                }
                 label={t("section_archive")}
                 caption={summaryCaption(PseudoCollectionID.archiveItems)}
                 onClick={handleOpenArchiveSection}
             />
             <RowButton
-                startIcon={<VisibilityOffIcon />}
+                startIcon={
+                    <HugeiconsIcon
+                        icon={ViewOffSlashIcon}
+                        size={shortcutIconSize}
+                    />
+                }
                 label={t("section_hidden")}
                 caption={
                     <LockOutlinedIcon
@@ -741,7 +801,12 @@ const ShortcutSection: React.FC<ShortcutSectionProps> = ({
                 onClick={handleOpenHiddenSection}
             />
             <RowButton
-                startIcon={<DeleteOutlineIcon />}
+                startIcon={
+                    <HugeiconsIcon
+                        icon={Delete02Icon}
+                        size={shortcutIconSize}
+                    />
+                }
                 label={t("section_trash")}
                 caption={summaryCaption(PseudoCollectionID.trash)}
                 onClick={handleOpenTrashSection}
@@ -758,6 +823,8 @@ type UtilitySectionProps = SectionProps &
         preferencesVisibilityProps: ModalVisibilityProps;
         showHelp: () => void;
         helpVisibilityProps: ModalVisibilityProps;
+        showFreeUpSpace: () => void;
+        freeUpSpaceVisibilityProps: ModalVisibilityProps;
         watchFolderView: boolean;
         onShowWatchFolder: () => void;
         onCloseWatchFolder: () => void;
@@ -767,7 +834,8 @@ type UtilitySectionProps = SectionProps &
         onPreferencesActionHandled: (action?: PreferencesAction) => void;
         pendingHelpAction?: HelpAction;
         onHelpActionHandled: (action?: HelpAction) => void;
-        onRouteToDeduplicate: () => void;
+        pendingFreeUpSpaceAction?: FreeUpSpaceAction;
+        onFreeUpSpaceActionHandled: (action?: FreeUpSpaceAction) => void;
     };
 
 const UtilitySection: React.FC<UtilitySectionProps> = ({
@@ -780,6 +848,8 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
     preferencesVisibilityProps,
     showHelp,
     helpVisibilityProps,
+    showFreeUpSpace,
+    freeUpSpaceVisibilityProps,
     watchFolderView,
     onShowWatchFolder,
     onCloseWatchFolder,
@@ -789,15 +859,9 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
     onPreferencesActionHandled,
     pendingHelpAction,
     onHelpActionHandled,
-    onRouteToDeduplicate,
+    pendingFreeUpSpaceAction,
+    onFreeUpSpaceActionHandled,
 }) => {
-    const { showMiniDialog } = useBaseContext();
-
-    const handleExport = () =>
-        isDesktop
-            ? onShowExport()
-            : showMiniDialog(downloadAppDialogAttributes());
-
     return (
         <>
             <RowButton
@@ -814,8 +878,8 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
             )}
             <RowButton
                 variant="secondary"
-                label={t("deduplicate_files")}
-                onClick={onRouteToDeduplicate}
+                label={t("free_up_space")}
+                onClick={showFreeUpSpace}
             />
             <RowButton
                 variant="secondary"
@@ -835,7 +899,7 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
                         <RowButtonEndActivityIndicator />
                     )
                 }
-                onClick={handleExport}
+                onClick={onShowExport}
             />
             <Help
                 {...helpVisibilityProps}
@@ -861,6 +925,12 @@ const UtilitySection: React.FC<UtilitySectionProps> = ({
                 onRootClose={onCloseSidebar}
                 pendingAction={pendingPreferencesAction}
                 onActionHandled={onPreferencesActionHandled}
+            />
+            <FreeUpSpace
+                {...freeUpSpaceVisibilityProps}
+                onRootClose={onCloseSidebar}
+                pendingAction={pendingFreeUpSpaceAction}
+                onActionHandled={onFreeUpSpaceActionHandled}
             />
         </>
     );
@@ -943,16 +1013,41 @@ const Account: React.FC<AccountProps> = ({
         void router.push("/change-email");
     }, [router]);
 
+    const handleRecoveryKey = useCallback(async () => {
+        if (isDesktop) {
+            const reauthResult = await reauthenticateWithAppLock();
+            if (reauthResult === "cancelled") return;
+            if (reauthResult === "fallback") await onAuthenticateUser();
+        } else {
+            await onAuthenticateUser();
+        }
+        showRecoveryKey();
+    }, [onAuthenticateUser, showRecoveryKey]);
+
     const handlePasskeys = useCallback(async () => {
         onRootClose();
+        if (isDesktop) {
+            suppressAutoLockOnBlurForTrustedPrompt();
+        }
         await openAccountsManagePasskeysPage();
     }, [onRootClose]);
+
+    const handleActiveSessions = useCallback(async () => {
+        if (isDesktop) {
+            const reauthResult = await reauthenticateWithAppLock();
+            if (reauthResult === "cancelled") return;
+            if (reauthResult === "fallback") await onAuthenticateUser();
+        } else {
+            await onAuthenticateUser();
+        }
+        showSessions();
+    }, [onAuthenticateUser, showSessions]);
 
     useEffect(() => {
         if (!open || !pendingAction) return;
         switch (pendingAction) {
             case "account.recoveryKey":
-                showRecoveryKey();
+                void handleRecoveryKey();
                 break;
             case "account.twoFactor.reconfigure":
             case "account.twoFactor":
@@ -970,24 +1065,23 @@ const Account: React.FC<AccountProps> = ({
             case "account.deleteAccount":
                 showDeleteAccount();
                 break;
+            case "account.sessions":
+                void handleActiveSessions();
+                break;
         }
         onActionHandled?.();
     }, [
+        handleActiveSessions,
         handleChangeEmail,
         handleChangePassword,
+        handleRecoveryKey,
         handlePasskeys,
         open,
         onActionHandled,
         pendingAction,
         showDeleteAccount,
-        showRecoveryKey,
         showTwoFactor,
     ]);
-
-    const handleActiveSessions = async () => {
-        await onAuthenticateUser();
-        showSessions();
-    };
 
     return (
         <TitledNestedSidebarDrawer
@@ -1004,7 +1098,7 @@ const Account: React.FC<AccountProps> = ({
                             />
                         }
                         label={t("recovery_key")}
-                        onClick={showRecoveryKey}
+                        onClick={() => void handleRecoveryKey()}
                     />
                 </RowButtonGroup>
                 <RowButtonGroup>
@@ -1020,6 +1114,12 @@ const Account: React.FC<AccountProps> = ({
                         onClick={handleActiveSessions}
                     />
                 </RowButtonGroup>
+                {isDesktop && (
+                    <DesktopAppLockSettings
+                        onAuthenticateUser={onAuthenticateUser}
+                        onRootClose={onRootClose}
+                    />
+                )}
                 <RowButtonGroup>
                     <RowButton
                         label={t("change_password")}
@@ -1056,6 +1156,43 @@ const Account: React.FC<AccountProps> = ({
                 {...{ onAuthenticateUser }}
             />
         </TitledNestedSidebarDrawer>
+    );
+};
+
+const DesktopAppLockSettings: React.FC<
+    Pick<SidebarProps, "onAuthenticateUser"> & Pick<AccountProps, "onRootClose">
+> = ({ onAuthenticateUser, onRootClose }) => {
+    const appLock = useAppLockSnapshot();
+    const { show, props } = useModalVisibility();
+
+    const handleOpen = useCallback(async () => {
+        try {
+            await onAuthenticateUser();
+            show();
+        } catch (error) {
+            if (isReauthenticationCancellation(error)) return;
+            log.error("Failed to open app lock settings", error);
+        }
+    }, [onAuthenticateUser, show]);
+
+    return (
+        <>
+            <RowButtonGroup>
+                <RowButton
+                    label={t("app_lock")}
+                    caption={
+                        !appLock.supported
+                            ? t("app_lock_not_supported", {
+                                  defaultValue: "App lock is not supported",
+                              })
+                            : undefined
+                    }
+                    disabled={!appLock.supported}
+                    onClick={handleOpen}
+                />
+            </RowButtonGroup>
+            <AppLockSettings {...props} onRootClose={onRootClose} />
+        </>
     );
 };
 
@@ -1195,6 +1332,8 @@ const LanguageSelector = () => {
     const locale = getLocaleInUse();
 
     const updateCurrentLocale = (newLocale: SupportedLocale) => {
+        if (newLocale === locale) return;
+
         void setLocaleInUse(newLocale).then(() => {
             // [Note: Changing locale causes a full reload]
             //
@@ -1204,6 +1343,12 @@ const LanguageSelector = () => {
             // We also rely on this behaviour by caching various formatters in
             // module static variables that not get updated if the i18n.language
             // changes unless there is a full reload.
+            //
+            // Mark this as a trusted app-initiated reload so desktop app-lock
+            // setup does not force an immediate lock screen.
+            if (globalThis.electron) {
+                suppressAppLockRefreshFromSessionForTrustedReload();
+            }
             window.location.reload();
         });
     };
@@ -1238,6 +1383,8 @@ const localeName = (locale: SupportedLocale) => {
             return "Français";
         case "de-DE":
             return "Deutsch";
+        case "ca-ES":
+            return "Català";
         case "zh-CN":
             return "中文";
         case "nl-NL":
@@ -1715,6 +1862,77 @@ const Help: React.FC<HelpProps> = ({
                         onClick={testUpload}
                     />
                 )}
+            </Stack>
+        </TitledNestedSidebarDrawer>
+    );
+};
+
+type FreeUpSpaceProps = NestedSidebarDrawerVisibilityProps & {
+    pendingAction?: FreeUpSpaceAction;
+    onActionHandled?: (action?: FreeUpSpaceAction) => void;
+};
+
+const FreeUpSpace: React.FC<FreeUpSpaceProps> = ({
+    open,
+    onClose,
+    onRootClose,
+    pendingAction,
+    onActionHandled,
+}) => {
+    const router = useRouter();
+
+    const handleRootClose = useCallback(() => {
+        onClose();
+        onRootClose();
+    }, [onClose, onRootClose]);
+
+    const handleDeduplicate = useCallback(() => {
+        onRootClose();
+        void router.push("/duplicates");
+    }, [onRootClose, router]);
+
+    const handleLargeFiles = useCallback(() => {
+        onRootClose();
+        void router.push("/large-files");
+    }, [onRootClose, router]);
+
+    useEffect(() => {
+        if (!open || !pendingAction) return;
+        switch (pendingAction) {
+            case "freeUpSpace.deduplicate":
+                handleDeduplicate();
+                break;
+            case "freeUpSpace.largeFiles":
+                handleLargeFiles();
+                break;
+        }
+        onActionHandled?.();
+    }, [
+        handleDeduplicate,
+        handleLargeFiles,
+        open,
+        onActionHandled,
+        pendingAction,
+    ]);
+
+    return (
+        <TitledNestedSidebarDrawer
+            {...{ open, onClose }}
+            onRootClose={handleRootClose}
+            title={t("free_up_space")}
+        >
+            <Stack sx={{ px: 2, py: 1, gap: 3 }}>
+                <RowButtonGroup>
+                    <RowButton
+                        label={t("deduplicate_files")}
+                        onClick={handleDeduplicate}
+                    />
+                    <RowButtonDivider />
+                    <RowButton
+                        label={t("large_files_title")}
+                        onClick={handleLargeFiles}
+                    />
+                </RowButtonGroup>
             </Stack>
         </TitledNestedSidebarDrawer>
     );

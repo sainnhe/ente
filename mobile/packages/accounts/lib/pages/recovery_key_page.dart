@@ -5,11 +5,12 @@ import 'package:bip39/bip39.dart' as bip39;
 import 'package:dots_indicator/dots_indicator.dart';
 import 'package:ente_configuration/base_configuration.dart';
 import 'package:ente_configuration/constants.dart';
+import 'package:ente_pure_utils/ente_pure_utils.dart';
 import 'package:ente_strings/ente_strings.dart';
 import 'package:ente_ui/components/buttons/gradient_button.dart';
 import 'package:ente_ui/theme/ente_theme.dart';
 import 'package:ente_ui/utils/toast_util.dart';
-import 'package:ente_utils/platform_util.dart';
+import 'package:ente_utils/ente_utils.dart';
 import 'package:ente_utils/share_utils.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
@@ -152,7 +153,7 @@ class _RecoveryKeyPageState extends State<RecoveryKeyPage> {
                               ),
                             );
 
-                            if (PlatformUtil.isMobile()) {
+                            if (PlatformDetector.isMobile()) {
                               return GestureDetector(
                                 onTap: () async => await copy(),
                                 child: content,
@@ -199,29 +200,31 @@ class _RecoveryKeyPageState extends State<RecoveryKeyPage> {
     final textTheme = getEnteTextTheme(context);
     final List<Widget> childrens = [];
 
-    childrens.add(
-      Center(
-        child: DotsIndicator(
-          dotsCount: 3,
-          position: 2,
-          decorator: DotsDecorator(
-            activeColor: colorScheme.primary700,
-            color: colorScheme.primary700.withValues(alpha: 0.32),
-            activeShape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
+    if (widget.showProgressBar) {
+      childrens.add(
+        Center(
+          child: DotsIndicator(
+            dotsCount: 3,
+            position: 2,
+            decorator: DotsDecorator(
+              activeColor: colorScheme.primary700,
+              color: colorScheme.primary700.withValues(alpha: 0.32),
+              activeShape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              size: const Size(10, 10),
+              activeSize: const Size(20, 10),
+              spacing: const EdgeInsets.all(6),
             ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            size: const Size(10, 10),
-            activeSize: const Size(20, 10),
-            spacing: const EdgeInsets.all(6),
           ),
         ),
-      ),
-    );
+      );
 
-    childrens.add(const SizedBox(height: 20));
+      childrens.add(const SizedBox(height: 20));
+    }
 
     childrens.add(
       GradientButton(
@@ -262,7 +265,7 @@ class _RecoveryKeyPageState extends State<RecoveryKeyPage> {
     final bytes = utf8.encode(recoveryKey);
     final time = DateTime.now().millisecondsSinceEpoch;
 
-    await PlatformUtil.shareFile(
+    await FileSaverUtil.saveFile(
       "ente_recovery_key_$time",
       "txt",
       bytes,

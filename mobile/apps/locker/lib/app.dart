@@ -16,14 +16,23 @@ import 'package:locker/core/locale.dart';
 import 'package:locker/l10n/l10n.dart';
 import 'package:locker/services/collections/collections_service.dart';
 import 'package:locker/services/configuration.dart';
+import "package:locker/services/update_service.dart";
 import 'package:locker/ui/pages/home_page.dart';
 import 'package:locker/ui/pages/onboarding_page.dart';
+import "package:locker/ui/settings/widgets/app_update_dialog.dart";
+import "package:locker/ui/settings/widgets/change_log_sheet.dart";
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 class App extends StatefulWidget {
   final Locale? locale;
-  const App({super.key, this.locale = const Locale("en")});
+  final AdaptiveThemeMode? savedThemeMode;
+
+  const App({
+    super.key,
+    this.locale = const Locale("en"),
+    this.savedThemeMode,
+  });
 
   static void setLocale(BuildContext context, Locale newLocale) {
     final _AppState state = context.findAncestorStateOfType<_AppState>()!;
@@ -69,9 +78,55 @@ class _AppState extends State<App>
       if (mounted) {
         setState(() {});
       }
+      unawaited(_showChangeLogIfNeeded());
     });
     locale = widget.locale;
+    unawaited(_runStartupPrompts());
     super.initState();
+  }
+
+  Future<void> _runStartupPrompts() async {
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) {
+      return;
+    }
+    final didShowUpdatePrompt = await _checkForAppUpdates();
+    if (!mounted || didShowUpdatePrompt) {
+      return;
+    }
+    await _showChangeLogIfNeeded();
+  }
+
+  Future<bool> _checkForAppUpdates() async {
+    final shouldShow =
+        await UpdateService.instance.shouldShowUpdateNotification();
+    if (!shouldShow || !mounted) {
+      return false;
+    }
+
+    final latestVersion = UpdateService.instance.getLatestVersionInfo();
+    if (latestVersion == null) {
+      return false;
+    }
+
+    await showAppUpdateBottomSheet(
+      context,
+      latestVersionInfo: latestVersion,
+    );
+    await UpdateService.instance.markUpdateNotificationShown();
+    return true;
+  }
+
+  Future<void> _showChangeLogIfNeeded() async {
+    if (!mounted || !Configuration.instance.hasConfiguredAccount()) {
+      return;
+    }
+    final shouldShow = await UpdateService.instance.shouldShowChangeLog();
+    if (!shouldShow || !mounted) {
+      return;
+    }
+    await showChangeLogSheet(context);
+    await UpdateService.instance.markChangeLogShown();
   }
 
   @override
@@ -104,7 +159,7 @@ class _AppState extends State<App>
         return AdaptiveTheme(
           light: lightThemeData,
           dark: darkThemeData,
-          initial: AdaptiveThemeMode.system,
+          initial: widget.savedThemeMode ?? AdaptiveThemeMode.system,
           builder: (lightTheme, dartTheme) => MaterialApp(
             title: "ente",
             themeMode: ThemeMode.system,

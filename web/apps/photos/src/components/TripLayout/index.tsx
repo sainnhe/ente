@@ -1,8 +1,8 @@
 import { Box, styled, useMediaQuery, useTheme } from "@mui/material";
-import { DownloadStatusNotifications } from "components/DownloadStatusNotifications";
+import { ActiveDownloadStatusNotifications } from "components/ActiveDownloadStatusNotifications";
 import { useModalVisibility } from "ente-base/components/utils/modal";
 import type { PublicAlbumsCredentials } from "ente-base/http";
-import { useSaveGroups } from "ente-gallery/components/utils/save-groups";
+import { useSaveGroupsActions } from "ente-gallery/components/utils/save-groups";
 import {
     FileViewer,
     type FileViewerInitialSidebar,
@@ -88,7 +88,7 @@ export const TripLayout: React.FC<TripLayoutProps> = ({
     const isMobileOrTablet = useMediaQuery(theme.breakpoints.down("md")); // 960px breakpoint for mobile and tablet
 
     // Save groups hook for download progress tracking
-    const { saveGroups, onAddSaveGroup, onRemoveSaveGroup } = useSaveGroups();
+    const { onAddSaveGroup } = useSaveGroupsActions();
     const { show: showPublicFeed, props: publicFeedVisibilityProps } =
         useModalVisibility();
 
@@ -605,16 +605,12 @@ export const TripLayout: React.FC<TripLayoutProps> = ({
             />
 
             {/* Download progress notifications */}
-            <DownloadStatusNotifications
-                saveGroups={saveGroups}
-                onRemoveSaveGroup={onRemoveSaveGroup}
-            />
+            <ActiveDownloadStatusNotifications fullWidthOnMobile />
 
             {/* Public feed sidebar */}
             {collection && credentials?.current && collectionKey && (
                 <PublicFeedSidebar
                     {...publicFeedVisibilityProps}
-                    albumName={collectionTitle}
                     files={files}
                     credentials={credentials.current}
                     collectionKey={collectionKey}

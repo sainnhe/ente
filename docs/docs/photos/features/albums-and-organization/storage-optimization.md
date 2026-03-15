@@ -30,7 +30,7 @@ The app will delete all photos and videos that have been successfully backed up 
 **After freeing up space:**
 
 - Your photos remain in Ente and can be viewed anytime
-- Photos are automatically downloaded when you view them in the app
+- Photos are automatically cached when you view them in the app
 - You may need to clear your device's trash/recently deleted folder to fully reclaim the space
 
 **What gets deleted:**
@@ -50,8 +50,10 @@ The app will delete all photos and videos that have been successfully backed up 
 When you free up space, photos are removed from your device but stay in Ente. To view a photo:
 
 - Simply open it in the Ente app
-- It will be downloaded automatically when you view it
-- Downloaded photos use your device storage again
+- It will be automatically cached when you view it
+- To download and view the photo in any other gallery
+    - Long press the thumbnail and choose download option
+    - Open the photo, choose the three dots at top right and choose download option.
 
 ## Remove exact duplicates
 
@@ -75,7 +77,7 @@ Open `Settings > Backup > Free up space > Remove duplicates`, review the duplica
 
 **On desktop:**
 
-Open `Settings > Deduplicate files`, review the duplicates found, and confirm to remove them.
+Open `Settings > Free up space > Deduplicate files`, review the duplicates found, and confirm to remove them.
 
 ### What happens during deduplication
 
@@ -109,7 +111,7 @@ Open `Settings > Backup > Free up space > Similar images`, review each group of 
 
 **On desktop:**
 
-The "Similar images" feature is currently only available on mobile. Desktop only supports exact duplicate detection via `Settings > Deduplicate files`.
+The "Similar images" feature is currently only available on mobile. Desktop only supports exact duplicate detection via `Settings > Free up space > Deduplicate files`.
 
 ### Album-linked similarity management
 
@@ -129,6 +131,46 @@ The similar images feature requires:
 - Available on mobile and desktop apps
 
 Learn more about [Machine learning](/photos/features/search-and-discovery/machine-learning).
+
+## View large files
+
+If you want to identify which photos and videos are consuming the most storage in your Ente cloud, the large files tool helps you find and review them. This is useful for freeing up storage quota by deleting or managing files you may not need.
+
+### How it works
+
+The large files feature:
+
+1. Scans your entire Ente library for files larger than 10 MB
+2. Sorts files by size (largest first)
+3. Lets you filter by type: All, Photos, or Videos
+4. Allows you to select and delete files to free up cloud storage
+
+### Using the large files tool
+
+**On mobile:**
+
+Open `Settings > Backup > Free up space > Large files` to see your largest files sorted by size.
+
+**On desktop:**
+
+Open `Settings > Free up space > Large files` to see your largest files sorted by size.
+
+From here you can:
+
+- Review which files are taking up the most space
+- Filter by photos or videos using the filter chips at the top
+- Select individual files or multiple files
+- Delete selected files to free up your Ente storage quota
+
+Deleting files moves them to Trash (recoverable for 30 days) before permanent deletion
+
+### What counts as a large file
+
+Files are shown if they:
+
+- Are larger than 10 MB in size
+- Have been uploaded to Ente
+- Are owned by you (not shared files from others)
 
 ## Delete suggestions
 

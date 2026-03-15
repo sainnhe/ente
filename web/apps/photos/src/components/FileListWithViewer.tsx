@@ -97,6 +97,7 @@ export type FileListWithViewerProps = {
     FileListProps,
     | "mode"
     | "modePlus"
+    | "layout"
     | "header"
     | "footer"
     | "disableGrouping"
@@ -108,6 +109,11 @@ export type FileListWithViewerProps = {
     | "favoriteFileIDs"
     | "emailByUserID"
     | "listBorderRadius"
+    | "onContextMenuAction"
+    | "onContextMenuOpenChange"
+    | "showAddPersonAction"
+    | "showEditLocationAction"
+    | "suppressSelectionUI"
 > &
     Pick<
         FileViewerProps,
@@ -123,6 +129,7 @@ export type FileListWithViewerProps = {
         | "onVisualFeedback"
         | "onToggleFavorite"
         | "onFileVisibilityUpdate"
+        | "onSendLink"
         | "onSelectCollection"
         | "onSelectPerson"
         | "publicAlbumsCredentials"
@@ -140,6 +147,7 @@ export type FileListWithViewerProps = {
 export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
     mode,
     modePlus,
+    layout,
     header,
     footer,
     user,
@@ -157,6 +165,11 @@ export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
     favoriteFileIDs,
     emailByUserID,
     listBorderRadius,
+    onContextMenuAction,
+    onContextMenuOpenChange,
+    showAddPersonAction,
+    showEditLocationAction,
+    suppressSelectionUI,
     isInIncomingSharedCollection,
     isInHiddenSection,
     fileNormalCollectionIDs,
@@ -171,6 +184,7 @@ export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
     onAddSaveGroup,
     onToggleFavorite,
     onFileVisibilityUpdate,
+    onSendLink,
     onMarkTempDeleted,
     onSelectCollection,
     onSelectPerson,
@@ -198,7 +212,7 @@ export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
     const { show: showMapDialog, props: mapDialogVisibilityProps } =
         useModalVisibility();
     const { onGenericError } = useBaseContext();
-    const { mapEnabled, isCommentsEnabled } = useSettingsSnapshot();
+    const { mapEnabled } = useSettingsSnapshot();
     const { mode: colorSchemeMode, systemMode } = useColorScheme();
     const theme = useTheme();
     const resolvedMode =
@@ -285,7 +299,7 @@ export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
     const shouldShowMapButton =
         modePlus !== "search" &&
         activeCollectionSummary?.type === "all" &&
-        activeCollectionSummary.fileCount > 0;
+        (activeCollectionSummary.fileCount > 0 || files.length > 0);
 
     const handleShowMap = useCallback(async () => {
         if (!activeCollectionSummary) return;
@@ -336,6 +350,7 @@ export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
                         {...{
                             mode,
                             modePlus,
+                            layout,
                             header: headerWithMap,
                             footer,
                             user,
@@ -350,6 +365,12 @@ export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
                             listBorderRadius,
                             onScroll,
                             onVisibleDateChange,
+                            collectionSummary: activeCollectionSummary,
+                            onContextMenuAction,
+                            onContextMenuOpenChange,
+                            showAddPersonAction,
+                            showEditLocationAction,
+                            suppressSelectionUI,
                         }}
                         onItemClick={handleThumbnailClick}
                     />
@@ -380,6 +401,7 @@ export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
                     onVisualFeedback,
                     onToggleFavorite,
                     onFileVisibilityUpdate,
+                    onSendLink,
                     onSelectCollection,
                     onSelectPerson,
                     publicAlbumsCredentials,
@@ -388,7 +410,7 @@ export const FileListWithViewer: React.FC<FileListWithViewerProps> = ({
                     enableComment,
                     enableJoin,
                 }}
-                isCommentsFeatureEnabled={isCommentsEnabled}
+                isCommentsFeatureEnabled
                 onTriggerRemotePull={handleTriggerRemotePull}
                 onDownload={handleDownload}
                 onDelete={handleDelete}

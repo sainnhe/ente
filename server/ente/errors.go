@@ -136,6 +136,12 @@ var ErrUserNotRegistered = &ApiError{
 	Message:        "User is not registered",
 }
 
+var ErrUserSignupIncomplete = &ApiError{
+	Code:           UserSignupIncomplete,
+	HttpStatusCode: http.StatusNotFound,
+	Message:        "User signup is incomplete",
+}
+
 var ErrCollectionNotEmpty = ApiError{
 	Code:           CollectionNotEmpty,
 	HttpStatusCode: http.StatusConflict,
@@ -225,6 +231,12 @@ var ErrLinkEditNotAllowed = ApiError{
 	HttpStatusCode: http.StatusForbidden,
 }
 
+var ErrFileInTrash = ApiError{
+	Code:           FileInTrash,
+	Message:        "One or more files are in trash or have been deleted, please restore them first",
+	HttpStatusCode: http.StatusConflict,
+}
+
 var ErrLockerRegistrationDisabled = &ApiError{
 	Code:           LockerRegistrationDisabled,
 	Message:        "Locker is restricted to paid users currently",
@@ -250,6 +262,9 @@ const (
 
 	// Business specific error codes
 	FamiliySizeLimitExceeded ErrorCode = "FAMILY_SIZE_LIMIT_EXCEEDED"
+
+	// UserSignupIncomplete indicates that account exists but signup is not fully completed
+	UserSignupIncomplete ErrorCode = "USER_SIGNUP_INCOMPLETE"
 
 	// Subscription Already Associted with different account
 	SubscriptionAlreadyClaimed ErrorCode = "SUBSCRIPTION_ALREADY_CLAIMED"
@@ -284,6 +299,9 @@ const (
 
 	// FileLimitReached indicates the user hit the maximum number of files allowed
 	FileLimitReached ErrorCode = "FILE_LIMIT_REACHED"
+
+	// FileInTrash indicates files are present in trash and cannot be added to collection
+	FileInTrash ErrorCode = "FILE_IN_TRASH"
 
 	SessionExpired ErrorCode = "SESSION_EXPIRED"
 

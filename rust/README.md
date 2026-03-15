@@ -38,48 +38,66 @@
 └───────────────────────────┘
 ```
 
+## Contents (this repo)
+
+- `rust/core/` (`ente-core`) - shared, pure Rust code used by clients (crypto + auth, plus small HTTP/URL helpers).
+- `rust/cli/` (`ente-rs`) - Rust CLI.
+- `rust/ensu/` - LLM chat stack (see `rust/ensu/README.md`).
+
 ## Directory Structure
 
 ```
 rust/
-├── cli/                    # CLI package
+├── cli/                          # CLI package (ente-rs)
 │   ├── src/
 │   │   └── main.rs
 │   ├── Cargo.toml
 │   └── Cargo.lock
 │
-└── core/                   # Pure Rust business logic
-    ├── src/
-    │   ├── lib.rs
-    │   └── urls.rs
-    └── Cargo.toml          # crate name: ente-core
+├── core/                         # Pure Rust shared logic (ente-core)
+│   ├── src/
+│   │   ├── lib.rs
+│   │   ├── crypto/
+│   │   └── auth/
+│   ├── docs/
+│   │   ├── crypto.md
+│   │   └── auth.md
+│   └── Cargo.toml
+│
+└── ensu/                         # LLM chat stack (see rust/ensu/README.md)
 
-web/packages/wasm/          # WASM bindings (lives in web workspace)
+rust/uniffi/                      # UniFFI bindings for core crypto/auth + ensu
+├── core/
+└── ensu/
+
+web/packages/wasm/                # WASM bindings (lives in web workspace)
 ├── src/
-│   └── lib.rs              # #[wasm_bindgen] wrappers around ente-core
-├── Cargo.toml              # crate name: ente-wasm
-├── package.json            # includes wasm-pack as devDependency
-└── pkg/                    # generated output (gitignored)
+│   └── lib.rs                    # #[wasm_bindgen] wrappers around ente-core
+├── Cargo.toml                    # crate name: ente-wasm
+├── package.json                  # includes wasm-pack as devDependency
+└── pkg/                          # generated output (gitignored)
 
-mobile/packages/rust/       # Shared FRB bindings for all mobile apps
+mobile/packages/rust/             # Shared FRB bindings for all mobile apps
 ├── rust/
 │   ├── src/
-│   │   └── api/            # #[frb] wrappers around ente-core
-│   └── Cargo.toml          # crate name: ente_rust
-├── lib/                    # Generated Dart bindings
-└── pubspec.yaml            # Flutter plugin package
+│   │   └── api/                  # #[frb] wrappers around ente-core
+│   └── Cargo.toml                # crate name: ente_rust
+├── lib/                          # Generated Dart bindings
+└── pubspec.yaml                  # Flutter plugin package
 
-mobile/apps/photos/rust/    # Photos app-specific FRB bindings
+mobile/apps/photos/rust/          # Photos app-specific FRB bindings
 ├── src/
 │   ├── lib.rs
-│   └── api/                # #[frb] app-specific code (usearch, ML)
+│   └── api/                      # #[frb] app-specific code (usearch, ML)
 │       └── *.rs
-└── Cargo.toml              # crate name: ente_photos_rust
+└── Cargo.toml                    # crate name: ente_photos_rust
 ```
 
 **Crates:**
 
 - `ente-core` - shared business logic (pure Rust, no FFI)
+  - Docs: `rust/core/docs/crypto.md`, `rust/core/docs/auth.md`
+- `ente-rs` - CLI binary
 - `ente-wasm` - wasm-bindgen wrappers for web
 - `ente_rust` - shared FRB wrappers for mobile (Dart class: `EnteRust`)
 - `ente_photos_rust` - Photos app-specific FRB (Dart class: `EntePhotosRust`)
@@ -93,8 +111,6 @@ A Rust library that provides the `#[wasm_bindgen]` attribute macro. When you ann
 1. Marks the function for export to JavaScript
 2. Handles type conversions between Rust and JS (e.g., `String` ↔ JS string, `i64` ↔ `BigInt`)
 3. Generates metadata that the wasm-bindgen CLI uses to create JS/TS glue code
-
-The library itself is lightweight - just macros and runtime types.
 
 ### [wasm-pack](https://github.com/drager/wasm-pack)
 
@@ -126,6 +142,16 @@ cargo fmt        # format
 cargo clippy     # lint
 cargo build      # build
 cargo test       # test
+```
+
+**ente-cli (rust/cli/):**
+
+```sh
+cargo fmt        # format
+cargo clippy     # lint
+cargo build      # build
+cargo test       # test
+cargo run -- --help
 ```
 
 **ente-wasm (web/packages/wasm/):**
@@ -166,48 +192,3 @@ flutter_rust_bridge_codegen generate
 flutter_rust_bridge_codegen generate
 flutter test
 ```
-
-## Future
-
-### CLI Migration
-
-A WIP CLI lives in `rust/cli/` and depends on ente-core via path dependency.
-
-Next steps:
-
-1. Move code from CLI to ente-core, adding tests as we migrate.
-2. Update CLI to use ente-core implementations
-3. Prune CLI dependencies as code moves to core
-
-### WASM Compatibility
-
-Core crate must handle deps that don't compile to WASM:
-
-| Dependency             | Issue            | Solution                                                                                |
-| ---------------------- | ---------------- | --------------------------------------------------------------------------------------- |
-| `libsodium-sys-stable` | Native C library | Feature-gate; use pure Rust crypto (e.g., `chacha20poly1305` crate) or WebCrypto via JS |
-| `rusqlite`             | Native SQLite    | Feature-gate; WASM uses IndexedDB via JS interop                                        |
-| `tokio` (full)         | Threading        | Use WASM-compatible features only                                                       |
-| Filesystem ops         | No FS in browser | Abstract behind traits                                                                  |
-
-**Approach:** Cargo feature flags in ente-core?
-
-```toml
-[features]
-default = ["native"]
-native = ["libsodium-sys-stable", "rusqlite/bundled"]
-wasm = ["getrandom/js"]
-```
-
-### Other notes
-
-- Never panic across FFI boundary - always return Result or map errors
-- Keep binding functions thin - logic belongs in ente-core
-- Mobile binary size: LTO + symbol stripping
-
-## Tests
-
-- **ente-core:** Standard `cargo test` - comprehensive unit tests
-- **ente_photos_rust:** Minimal FRB smoke test in Dart to catch binding drift
-- **ente-wasm:** Vitest tests in web package
-- **Golden fixtures:** Share test vectors across native/FRB/WASM for crypto parity
